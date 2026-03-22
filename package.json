@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-discourse-linkshot",
   "description": "Render Discourse topic links into chat-friendly snapshots.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -38,8 +38,7 @@
     "description": {
       "zh": "自动识别 Discourse 话题链接并发送首楼/指定楼层截图。",
       "en": "Capture Discourse topic links into shareable snapshots for chat."
-    },
-    "preview": true
+    }
   },
   "peerDependencies": {
     "koishi": "^4.18.11"
