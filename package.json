@@ -1,0 +1,53 @@
+{
+  "name": "@koishijs/plugin-discourse-linkshot",
+  "description": "自动将 Discourse 论坛链接截图并发送到聊天中。",
+  "version": "0.1.0",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "src",
+    "readme.md"
+  ],
+  "author": "OpenAI Codex",
+  "license": "MIT",
+  "scripts": {
+    "lint": "eslint src tests --ext .ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/koishijs/koishi.git",
+    "directory": "plugins/common/discourse-linkshot"
+  },
+  "bugs": {
+    "url": "https://github.com/koishijs/koishi/issues"
+  },
+  "homepage": "https://koishi.chat/",
+  "keywords": [
+    "bot",
+    "chatbot",
+    "koishi",
+    "plugin",
+    "onebot",
+    "discourse",
+    "snapshot"
+  ],
+  "koishi": {
+    "browser": false,
+    "category": "tool",
+    "description": {
+      "en": "Automatically capture Discourse links as chat snapshots.",
+      "zh": "自动将 Discourse 论坛链接渲染为聊天截图。"
+    }
+  },
+  "peerDependencies": {
+    "koishi": "^4.18.11"
+  },
+  "dependencies": {
+    "playwright-core": "^1.44.0"
+  },
+  "devDependencies": {
+    "@koishijs/plugin-mock": "^2.6.6",
+    "koishi": "^4.18.11"
+  }
+}
