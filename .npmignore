@@ -1,0 +1,4 @@
+*.tsbuildinfo
+lib/*.tsbuildinfo
+lib/src/
+lib/tests/

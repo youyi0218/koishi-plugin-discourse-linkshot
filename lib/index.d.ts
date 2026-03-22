@@ -22,7 +22,6 @@ export interface Config {
     proxyBypass?: string;
     dohEnabled?: boolean;
     dohTemplates?: string;
-    injectCanvasHook?: boolean;
 }
 export interface ResolvedConfig {
     enabled: boolean;
@@ -46,7 +45,6 @@ export interface ResolvedConfig {
     proxyBypass: string;
     dohEnabled: boolean;
     dohTemplates: string;
-    injectCanvasHook: boolean;
 }
 interface BrowserCookie {
     name: string;
@@ -104,7 +102,6 @@ export interface SnapshotRenderer {
     dispose?(): Promise<void>;
 }
 export declare const Config: Schema<Config>;
-export declare const DISCOURSE_CANVAS_HOOK_SCRIPT: string;
 export declare function normalizeOrigin(value?: string): string;
 export declare function normalizeHost(value: string): string;
 export declare function trimUrlCandidate(value: string): string;

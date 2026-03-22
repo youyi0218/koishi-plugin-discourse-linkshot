@@ -28,7 +28,6 @@ const TEXT = {
   proxyBypass: '\u4ee3\u7406\u7ed5\u8fc7\u5217\u8868\uff0c\u591a\u4e2a\u503c\u7528\u9017\u53f7\u5206\u9694\uff0c\u4f8b\u5982 localhost,127.0.0.1\u3002',
   dohEnabled: '\u662f\u5426\u5f00\u542f DoH\uff08Secure DNS\uff09\u3002',
   dohTemplates: '\u81ea\u5b9a\u4e49 DoH \u5730\u5740\uff0c\u4f8b\u5982 https://dns.google/dns-query \uff1b\u591a\u4e2a\u5730\u5740\u7528\u7a7a\u683c\u5206\u9694\u3002',
-  injectCanvasHook: '\u662f\u5426\u6ce8\u5165 canvas / shadow hook\u3002\u5f53\u524d JSON \u6e32\u67d3\u6a21\u5f0f\u4e0b\u901a\u5e38\u4e0d\u9700\u8981\u3002',
   configIncomplete: '\u63d2\u4ef6\u5c1a\u672a\u5b8c\u6210\u914d\u7f6e\uff1a\u81f3\u5c11\u9700\u8981\u586b\u5199 forumOrigin\u3001executablePath\uff1b\u5982\u679c\u542f\u7528\u4e86\u524d\u7f6e\u57df\u4ee3\u7406\uff0c\u8fd8\u9700\u8981\u586b\u5199 frontProxyOrigin\u3002',
   listenAll: '\u5df2\u542f\u7528\u8bba\u575b\u94fe\u63a5\u76d1\u542c\uff0c\u5c06\u76d1\u542c\u6240\u6709\u9002\u914d\u5668\uff1b\u5339\u914d\u524d\u7f00\uff1a',
   listenPlatforms: '\u5df2\u542f\u7528\u8bba\u575b\u94fe\u63a5\u76d1\u542c\uff0c\u4ec5\u5728\u8fd9\u4e9b\u5e73\u53f0\u751f\u6548\uff1a',
@@ -70,7 +69,6 @@ export interface Config {
   proxyBypass?: string
   dohEnabled?: boolean
   dohTemplates?: string
-  injectCanvasHook?: boolean
 }
 
 export interface ResolvedConfig {
@@ -95,7 +93,6 @@ export interface ResolvedConfig {
   proxyBypass: string
   dohEnabled: boolean
   dohTemplates: string
-  injectCanvasHook: boolean
 }
 
 interface BrowserCookie {
@@ -253,25 +250,7 @@ export const Config: Schema<Config> = Schema.object({
   proxyBypass: Schema.string().description(TEXT.proxyBypass).default(''),
   dohEnabled: Schema.boolean().description(TEXT.dohEnabled).default(false),
   dohTemplates: Schema.string().description(TEXT.dohTemplates).default(''),
-  injectCanvasHook: Schema.boolean().description(TEXT.injectCanvasHook).default(true),
 })
-
-export const DISCOURSE_CANVAS_HOOK_SCRIPT = String.raw`(() => {
-  const transparentPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-
-  const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-  if (typeof originalToDataURL === 'function') {
-    Object.defineProperty(HTMLCanvasElement.prototype, 'toDataURL', {
-      configurable: true,
-      writable: true,
-      value: function(type, encoderOptions) {
-        const looksLikeWatermarkSize = this.width > 100 && this.width < 500 && this.width === this.height;
-        if (looksLikeWatermarkSize) return transparentPng;
-        return originalToDataURL.apply(this, arguments);
-      },
-    });
-  }
-})();`
 
 const DISCOURSE_WAIT_IMAGES_SCRIPT = String.raw`
   const sleep = (timeout) => new Promise((resolve) => setTimeout(resolve, timeout))
@@ -954,7 +933,6 @@ export function resolveConfig(config: Config): ResolvedConfig {
     proxyBypass: config.proxyBypass?.trim() || '',
     dohEnabled: config.dohEnabled ?? false,
     dohTemplates: config.dohTemplates?.trim() || '',
-    injectCanvasHook: config.injectCanvasHook ?? true,
   }
 }
 
