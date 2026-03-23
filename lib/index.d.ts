@@ -2,7 +2,6 @@ import { Context, Logger, Middleware, Schema, Session } from 'koishi';
 export declare const name = "discourse-linkshot";
 export interface Config {
     enabled?: boolean;
-    platforms?: string[];
     forumOrigin?: string;
     frontProxyEnabled?: boolean;
     frontProxyOrigin?: string;
@@ -13,6 +12,7 @@ export interface Config {
     executablePath?: string;
     userAgent?: string;
     navigationTimeout?: number;
+    pageWaitUntil?: BrowserWaitUntil;
     browserTimeout?: number;
     captureDelay?: number;
     viewportWidth?: number;
@@ -27,7 +27,6 @@ export interface Config {
 }
 export interface ResolvedConfig {
     enabled: boolean;
-    platforms: string[];
     forumOrigin: string;
     frontProxyEnabled: boolean;
     frontProxyOrigin: string;
@@ -38,6 +37,7 @@ export interface ResolvedConfig {
     executablePath: string;
     userAgent: string;
     navigationTimeout: number;
+    pageWaitUntil: BrowserWaitUntil;
     browserTimeout: number;
     captureDelay: number;
     viewportWidth: number;
@@ -50,6 +50,7 @@ export interface ResolvedConfig {
     dohEnabled: boolean;
     dohTemplates: string;
 }
+type BrowserWaitUntil = 'domcontentloaded' | 'load' | 'networkidle';
 interface BrowserCookie {
     name: string;
     value: string;

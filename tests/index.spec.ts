@@ -70,14 +70,6 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
       ])
   })
 
-  it('defaults to all platforms when platforms is omitted', () => {
-    expect(resolveConfig({
-      forumOrigin: 'https://forum.example.com',
-      tCookie: 'token-value',
-      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    }).platforms).to.deep.equal([])
-  })
-
   it('normalizes proxy settings', () => {
     expect(resolveConfig({
       forumOrigin: 'https://forum.example.com',
@@ -152,6 +144,21 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
 
     expect(createBrowserLaunchOptions(normal).timeout).to.equal(45000)
     expect(createBrowserLaunchOptions(disabled).timeout).to.equal(0)
+  })
+
+  it('defaults page wait mode to domcontentloaded and supports overriding it', () => {
+    const normal = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    })
+    const custom = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      pageWaitUntil: 'load',
+    })
+
+    expect(normal.pageWaitUntil).to.equal('domcontentloaded')
+    expect(custom.pageWaitUntil).to.equal('load')
   })
 
   it('supports closeBrowserAfterCapture config', () => {
@@ -292,4 +299,55 @@ describe('@koishijs/plugin-discourse-linkshot middleware', () => {
 
     await retryApp.stop()
   })
+
+  it('does not send intermediate text when public retry succeeds with auth', async () => {
+    const retryApp = new App()
+    retryApp.plugin(mock)
+    const retryCapture = jest.fn<SnapshotRenderer['capture']>(async (_url, options) => {
+      if (!options?.authenticated) throw new Error('public denied')
+      return Buffer.from('png-data')
+    })
+    retryApp.middleware(createLinkshotMiddleware(resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      tCookie: 'token-value',
+    }), { capture: retryCapture }, retryApp.logger('retry-auth-success')))
+
+    const retryClient = retryApp.mock.client('789')
+    await retryApp.start()
+
+    await retryClient.shouldReply('check https://forum.example.com/t/topic/1', '<img src="data:image/png;base64,cG5nLWRhdGE="/>')
+    expect(retryCapture.mock.calls.map((call) => call.arguments)).to.deep.equal([
+      ['https://forum.example.com/t/topic/1', { authenticated: false, useProxy: false }],
+      ['https://forum.example.com/t/topic/1', { authenticated: true, useProxy: false }],
+    ])
+
+    await retryApp.stop()
+  })
+
+  it('returns only final error after public and auth both fail', async () => {
+    const retryApp = new App()
+    retryApp.plugin(mock)
+    const retryCapture = jest.fn<SnapshotRenderer['capture']>(async (_url, options) => {
+      if (!options?.authenticated) throw new Error('public denied')
+      throw new Error('auth denied')
+    })
+    retryApp.middleware(createLinkshotMiddleware(resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      tCookie: 'token-value',
+    }), { capture: retryCapture }, retryApp.logger('retry-auth')))
+
+    const retryClient = retryApp.mock.client('790')
+    await retryApp.start()
+
+    await retryClient.shouldReply('check https://forum.example.com/t/topic/1', '\u8bba\u575b\u94fe\u63a5\u622a\u56fe\u5931\u8d25\uff1ahttps://forum.example.com/t/topic/1\n\u516c\u5f00\uff1apublic denied\n\u767b\u5f55\uff1aauth denied')
+    expect(retryCapture.mock.calls.map((call) => call.arguments)).to.deep.equal([
+      ['https://forum.example.com/t/topic/1', { authenticated: false, useProxy: false }],
+      ['https://forum.example.com/t/topic/1', { authenticated: true, useProxy: false }],
+    ])
+
+    await retryApp.stop()
+  })
 })
+

@@ -2,7 +2,6 @@ import { Context, h, Logger, Middleware, Schema, Session } from 'koishi'
 
 const TEXT = {
   enabled: '\u662f\u5426\u542f\u7528\u8bba\u575b\u94fe\u63a5\u622a\u56fe\u529f\u80fd\u3002',
-  platforms: '\u4ec5\u5728\u8fd9\u4e9b\u5e73\u53f0\u4e0a\u751f\u6548\uff1b\u7559\u7a7a\u8868\u793a\u6240\u6709\u5e73\u53f0\u3002',
   forumOrigin: '\u8bba\u575b\u4e3b\u7ad9\u5730\u5740\uff0c\u4f8b\u5982 https://forum.example.com',
   frontProxyEnabled: '\u662f\u5426\u542f\u7528\u8bbf\u95ee\u8bba\u575b\u7684\u524d\u7f6e\u57df\u4ee3\u7406\uff0c\u53ef\u4e0e proxyServer \u540c\u65f6\u5f00\u542f\u3002',
   frontProxyOrigin: '\u524d\u7f6e\u57df\u4ee3\u7406\u5730\u5740\uff0c\u4f8b\u5982 https://forum-proxy.example.com\uff1b\u542f\u7528\u540e\u4f1a\u628a forumOrigin \u7684\u94fe\u63a5\u6539\u5199\u5230\u8fd9\u91cc\u8bbf\u95ee\u3002',
@@ -12,6 +11,7 @@ const TEXT = {
   executablePath: '\u6d4f\u89c8\u5668\u53ef\u6267\u884c\u6587\u4ef6\u8def\u5f84\uff0c\u586b\u5199\u672c\u673a Chrome / Edge \u7684\u5b8c\u6574\u8def\u5f84\u3002',
   userAgent: '\u622a\u56fe\u8bbf\u95ee\u8bba\u575b\u65f6\u4f7f\u7528\u7684 User-Agent\u3002',
   navigationTimeout: '\u63a5\u53e3\u8bf7\u6c42\u3001\u7d20\u6750\u52a0\u8f7d\u4e0e\u622a\u56fe\u7684\u8d85\u65f6\u65f6\u95f4\uff08\u6beb\u79d2\uff09\u3002',
+  pageWaitUntil: '\u9875\u9762\u52a0\u8f7d\u5b8c\u6210\u7684\u5224\u5b9a\u65b9\u5f0f\uff1b\u9ed8\u8ba4 domcontentloaded \uff0c\u9047\u5230 load \u8d85\u65f6\u65f6\u5efa\u8bae\u4f7f\u7528\u8fd9\u4e2a\u3002',
   browserTimeout: '\u6d4f\u89c8\u5668\u542f\u52a8 / \u5efa\u8fde\u8d85\u65f6\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c0 \u8868\u793a\u4e0d\u68c0\u6d4b\u8d85\u65f6\u3002',
   captureDelay: '\u751f\u6210\u622a\u56fe\u524d\u989d\u5916\u7b49\u5f85\u7684\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c\u7528\u4e8e\u7b49\u5f85\u56fe\u7247\u8d44\u6e90\u5b8c\u6210\u52a0\u8f7d\u3002',
   viewportWidth: '\u622a\u56fe\u6d4f\u89c8\u5668\u89c6\u53e3\u5bbd\u5ea6\u3002',
@@ -19,8 +19,6 @@ const TEXT = {
   headless: '\u662f\u5426\u4ee5\u65e0\u5934\u6a21\u5f0f\u542f\u52a8\u6d4f\u89c8\u5668\u3002',
   closeBrowserAfterCapture: '\u662f\u5426\u5728\u6e32\u67d3\u5b8c\u6210\u540e\u7acb\u5373\u5173\u95ed\u6d4f\u89c8\u5668\u8fde\u63a5\u3002\u542f\u7528\u540e\u4f1a\u589e\u52a0\u6bcf\u6b21\u6e32\u67d3\u7684\u542f\u52a8\u65f6\u95f4\uff0c\u9002\u7528\u4e8e\u4f4e\u9891\u7387\u6e32\u67d3\u573a\u666f\u3002',
   sendFailureMessage: '\u622a\u56fe\u5931\u8d25\u65f6\uff0c\u662f\u5426\u5728\u804a\u5929\u4e2d\u53d1\u9001\u5931\u8d25\u63d0\u793a\u3002',
-  publicRetryMessage: '\u516c\u5f00\u8bbf\u95ee\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5\uff1a',
-  authMissingMessage: '\u672a\u914d\u7f6e\u767b\u5f55\u4fe1\u606f\uff0c\u65e0\u6cd5\u7ee7\u7eed\u91cd\u8bd5\u3002',
   publicErrorLabel: '\u516c\u5f00',
   authErrorLabel: '\u767b\u5f55',
   proxyRetryMessage: '\u4ee3\u7406\u8bbf\u95ee\u5931\u8d25\uff0c\u6b63\u5728\u76f4\u8fde\u91cd\u8bd5\uff1a',
@@ -32,7 +30,6 @@ const TEXT = {
   dohTemplates: '\u81ea\u5b9a\u4e49 DoH \u5730\u5740\uff0c\u4f8b\u5982 https://dns.google/dns-query \uff1b\u591a\u4e2a\u5730\u5740\u7528\u7a7a\u683c\u5206\u9694\u3002',
   configIncomplete: '\u63d2\u4ef6\u5c1a\u672a\u5b8c\u6210\u914d\u7f6e\uff1a\u81f3\u5c11\u9700\u8981\u586b\u5199 forumOrigin\u3001executablePath\uff1b\u5982\u679c\u542f\u7528\u4e86\u524d\u7f6e\u57df\u4ee3\u7406\uff0c\u8fd8\u9700\u8981\u586b\u5199 frontProxyOrigin\u3002',
   listenAll: '\u5df2\u542f\u7528\u8bba\u575b\u94fe\u63a5\u76d1\u542c\uff0c\u5c06\u76d1\u542c\u6240\u6709\u9002\u914d\u5668\uff1b\u5339\u914d\u524d\u7f00\uff1a',
-  listenPlatforms: '\u5df2\u542f\u7528\u8bba\u575b\u94fe\u63a5\u76d1\u542c\uff0c\u4ec5\u5728\u8fd9\u4e9b\u5e73\u53f0\u751f\u6548\uff1a',
   detected: '\u76d1\u542c\u5230\u8bba\u575b\u94fe\u63a5\uff1a',
   success: '\u8bba\u575b\u5feb\u7167\u53d1\u9001\u6210\u529f\uff1a',
   failure: '\u8bba\u575b\u5feb\u7167\u53d1\u9001\u5931\u8d25\uff1a',
@@ -51,7 +48,6 @@ export const name = 'discourse-linkshot'
 
 export interface Config {
   enabled?: boolean
-  platforms?: string[]
   forumOrigin?: string
   frontProxyEnabled?: boolean
   frontProxyOrigin?: string
@@ -62,6 +58,7 @@ export interface Config {
   executablePath?: string
   userAgent?: string
   navigationTimeout?: number
+  pageWaitUntil?: BrowserWaitUntil
   browserTimeout?: number
   captureDelay?: number
   viewportWidth?: number
@@ -77,7 +74,6 @@ export interface Config {
 
 export interface ResolvedConfig {
   enabled: boolean
-  platforms: string[]
   forumOrigin: string
   frontProxyEnabled: boolean
   frontProxyOrigin: string
@@ -88,6 +84,7 @@ export interface ResolvedConfig {
   executablePath: string
   userAgent: string
   navigationTimeout: number
+  pageWaitUntil: BrowserWaitUntil
   browserTimeout: number
   captureDelay: number
   viewportWidth: number
@@ -101,6 +98,8 @@ export interface ResolvedConfig {
   dohTemplates: string
 }
 
+type BrowserWaitUntil = 'domcontentloaded' | 'load' | 'networkidle'
+
 interface BrowserCookie {
   name: string
   value: string
@@ -108,9 +107,9 @@ interface BrowserCookie {
 }
 
 interface BrowserPage {
-  goto(url: string, options: { waitUntil: 'domcontentloaded' | 'load' | 'networkidle'; timeout: number }): Promise<unknown>
+  goto(url: string, options: { waitUntil: BrowserWaitUntil; timeout: number }): Promise<unknown>
   url(): string
-  setContent(html: string, options: { waitUntil: 'domcontentloaded' | 'load' | 'networkidle'; timeout: number }): Promise<void>
+  setContent(html: string, options: { waitUntil: BrowserWaitUntil; timeout: number }): Promise<void>
   waitForTimeout(timeout: number): Promise<void>
   evaluate<R, A = void>(pageFunction: (arg: A) => R | Promise<R>, arg?: A): Promise<R>
   screenshot(options: { type: 'png'; fullPage?: boolean; timeout: number }): Promise<Uint8Array>
@@ -238,7 +237,6 @@ export interface SnapshotRenderer {
 
 export const Config: Schema<Config> = Schema.object({
   enabled: Schema.boolean().description(TEXT.enabled).default(true),
-  platforms: Schema.array(String).description(TEXT.platforms).default([]),
   forumOrigin: Schema.string().description(TEXT.forumOrigin).default(''),
   frontProxyEnabled: Schema.boolean().description(TEXT.frontProxyEnabled).default(false),
   frontProxyOrigin: Schema.string().description(TEXT.frontProxyOrigin).default(''),
@@ -248,6 +246,11 @@ export const Config: Schema<Config> = Schema.object({
   executablePath: Schema.string().description(TEXT.executablePath).default(''),
   userAgent: Schema.string().description(TEXT.userAgent).default(DEFAULT_USER_AGENT),
   navigationTimeout: Schema.number().description(TEXT.navigationTimeout).default(DEFAULT_TIMEOUT),
+  pageWaitUntil: Schema.union([
+    Schema.const('domcontentloaded').description('推荐：页面主结构就绪后继续抓取。'),
+    Schema.const('load').description('等待页面 load 事件，更完整但更容易超时。'),
+    Schema.const('networkidle').description('等待网络基本空闲，最慢。'),
+  ]).role('radio').default('domcontentloaded').description(TEXT.pageWaitUntil),
   browserTimeout: Schema.number().description(TEXT.browserTimeout).default(DEFAULT_TIMEOUT),
   captureDelay: Schema.number().description(TEXT.captureDelay).default(DEFAULT_DELAY),
   viewportWidth: Schema.number().description(TEXT.viewportWidth).default(1280),
@@ -922,7 +925,6 @@ export function resolveConfig(config: Config): ResolvedConfig {
 
   return {
     enabled: config.enabled ?? true,
-    platforms: config.platforms?.map((value) => value.trim()).filter(Boolean) || [],
     forumOrigin,
     frontProxyEnabled: config.frontProxyEnabled ?? false,
     frontProxyOrigin,
@@ -933,6 +935,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     executablePath: config.executablePath?.trim() || '',
     userAgent: config.userAgent?.trim() || DEFAULT_USER_AGENT,
     navigationTimeout: config.navigationTimeout ?? DEFAULT_TIMEOUT,
+    pageWaitUntil: config.pageWaitUntil ?? 'domcontentloaded',
     browserTimeout: Math.max(0, config.browserTimeout ?? DEFAULT_TIMEOUT),
     captureDelay: config.captureDelay ?? DEFAULT_DELAY,
     viewportWidth: config.viewportWidth ?? 1280,
@@ -1403,7 +1406,7 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, requestedPost
 
 async function extractTopicFromPage(page: BrowserPage, url: string, requestedPostNumber: number, config: ResolvedConfig): Promise<ExtractedDomTopic> {
   await page.goto(url, {
-    waitUntil: 'load',
+    waitUntil: config.pageWaitUntil,
     timeout: config.navigationTimeout,
   })
 
@@ -1491,7 +1494,6 @@ export function createLinkshotMiddleware(config: ResolvedConfig, renderer: Snaps
   return async (session, next) => {
     const result = await next()
     if (!config.enabled) return result
-    if (config.platforms.length && !config.platforms.includes(session.platform)) return result
 
     const targetUrl = pickTargetUrl(session, config)
     if (!targetUrl) return result
@@ -1524,12 +1526,10 @@ export function createLinkshotMiddleware(config: ResolvedConfig, renderer: Snaps
         logger.warn(publicError)
 
         if (!config.authCookieSource && !config.tCookie) {
-          await session.send(`${formatCaptureFailureMessage(targetUrl, publicError)}\n${TEXT.authMissingMessage}`)
+          await session.send(formatCaptureFailureMessage(targetUrl, publicError))
           logger.warn(`${TEXT.failure}${targetUrl}`)
           return result
         }
-
-        await session.send(`${TEXT.publicRetryMessage}${targetUrl}`)
 
         try {
           buffer = await captureWithProxyFallback(true)
@@ -1644,7 +1644,7 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
       const html = renderTopicHtml(payload, opPost, requestedTopicPost, baseOrigin, sitePayload)
 
       return this.withPage(browser, baseOrigin, authenticated, async (page) => {
-        await page.setContent(html, { waitUntil: 'load', timeout: this.config.navigationTimeout })
+        await page.setContent(html, { waitUntil: this.config.pageWaitUntil, timeout: this.config.navigationTimeout })
         await page.evaluate((script) => new Function(script)(), SNAPSHOT_POST_PROCESS_SCRIPT)
         if (this.config.captureDelay > 0) await page.waitForTimeout(this.config.captureDelay)
 
@@ -1692,11 +1692,7 @@ export function apply(ctx: Context, config: Config) {
     return
   }
 
-  if (resolved.platforms.length) {
-    logger.info(`${TEXT.listenPlatforms}${resolved.platforms.join(', ')}`)
-  } else {
-    logger.info(`${TEXT.listenAll}${resolved.forumOrigin}`)
-  }
+  logger.info(`${TEXT.listenAll}${resolved.forumOrigin}`)
 
   const renderer = new PlaywrightDiscourseRenderer(resolved)
   ctx.middleware(createLinkshotMiddleware(resolved, renderer, logger))

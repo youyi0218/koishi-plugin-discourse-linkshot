@@ -34,6 +34,7 @@ plugins:
     proxyBypass: localhost,127.0.0.1
     dohEnabled: false
     dohTemplates: ''
+    pageWaitUntil: domcontentloaded
     browserTimeout: 30000
     closeBrowserAfterCapture: false
 ```
@@ -49,6 +50,7 @@ plugins:
 - `proxyBypass`: proxy bypass rules
 - `dohEnabled`: enable secure DNS
 - `dohTemplates`: custom DoH templates
+- `pageWaitUntil`: page readiness mode, default `domcontentloaded`; if `load` keeps timing out, use this default
 - `browserTimeout`: browser launch/connect timeout, use `0` to disable timeout detection
 - `closeBrowserAfterCapture`: close browser immediately after each render, suitable for low-frequency rendering
 - `captureDelay`: extra wait time before screenshot
