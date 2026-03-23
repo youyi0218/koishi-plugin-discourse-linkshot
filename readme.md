@@ -11,6 +11,7 @@ Render Discourse topic links into chat-friendly snapshots for Koishi.
 - Expand `details` / `spoiler` content before screenshotting
 - Append visible text-to-link references for regular Markdown links
 - Support browser proxy and DoH
+- Optional browser reuse, or close the browser right after each render
 
 ## Installation
 
@@ -33,6 +34,8 @@ plugins:
     proxyBypass: localhost,127.0.0.1
     dohEnabled: false
     dohTemplates: ''
+    browserTimeout: 30000
+    closeBrowserAfterCapture: false
 ```
 
 ## Main Options
@@ -46,6 +49,8 @@ plugins:
 - `proxyBypass`: proxy bypass rules
 - `dohEnabled`: enable secure DNS
 - `dohTemplates`: custom DoH templates
+- `browserTimeout`: browser launch/connect timeout, use `0` to disable timeout detection
+- `closeBrowserAfterCapture`: close browser immediately after each render, suitable for low-frequency rendering
 - `captureDelay`: extra wait time before screenshot
 - `navigationTimeout`: timeout for page loading and screenshotting
 

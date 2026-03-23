@@ -12,10 +12,12 @@ const TEXT = {
   executablePath: '\u6d4f\u89c8\u5668\u53ef\u6267\u884c\u6587\u4ef6\u8def\u5f84\uff0c\u586b\u5199\u672c\u673a Chrome / Edge \u7684\u5b8c\u6574\u8def\u5f84\u3002',
   userAgent: '\u622a\u56fe\u8bbf\u95ee\u8bba\u575b\u65f6\u4f7f\u7528\u7684 User-Agent\u3002',
   navigationTimeout: '\u63a5\u53e3\u8bf7\u6c42\u3001\u7d20\u6750\u52a0\u8f7d\u4e0e\u622a\u56fe\u7684\u8d85\u65f6\u65f6\u95f4\uff08\u6beb\u79d2\uff09\u3002',
+  browserTimeout: '\u6d4f\u89c8\u5668\u542f\u52a8 / \u5efa\u8fde\u8d85\u65f6\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c0 \u8868\u793a\u4e0d\u68c0\u6d4b\u8d85\u65f6\u3002',
   captureDelay: '\u751f\u6210\u622a\u56fe\u524d\u989d\u5916\u7b49\u5f85\u7684\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c\u7528\u4e8e\u7b49\u5f85\u56fe\u7247\u8d44\u6e90\u5b8c\u6210\u52a0\u8f7d\u3002',
   viewportWidth: '\u622a\u56fe\u6d4f\u89c8\u5668\u89c6\u53e3\u5bbd\u5ea6\u3002',
   viewportHeight: '\u622a\u56fe\u6d4f\u89c8\u5668\u89c6\u53e3\u9ad8\u5ea6\u3002',
   headless: '\u662f\u5426\u4ee5\u65e0\u5934\u6a21\u5f0f\u542f\u52a8\u6d4f\u89c8\u5668\u3002',
+  closeBrowserAfterCapture: '\u662f\u5426\u5728\u6e32\u67d3\u5b8c\u6210\u540e\u7acb\u5373\u5173\u95ed\u6d4f\u89c8\u5668\u8fde\u63a5\u3002\u542f\u7528\u540e\u4f1a\u589e\u52a0\u6bcf\u6b21\u6e32\u67d3\u7684\u542f\u52a8\u65f6\u95f4\uff0c\u9002\u7528\u4e8e\u4f4e\u9891\u7387\u6e32\u67d3\u573a\u666f\u3002',
   sendFailureMessage: '\u622a\u56fe\u5931\u8d25\u65f6\uff0c\u662f\u5426\u5728\u804a\u5929\u4e2d\u53d1\u9001\u5931\u8d25\u63d0\u793a\u3002',
   publicRetryMessage: '\u516c\u5f00\u8bbf\u95ee\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5\uff1a',
   authMissingMessage: '\u672a\u914d\u7f6e\u767b\u5f55\u4fe1\u606f\uff0c\u65e0\u6cd5\u7ee7\u7eed\u91cd\u8bd5\u3002',
@@ -60,10 +62,12 @@ export interface Config {
   executablePath?: string
   userAgent?: string
   navigationTimeout?: number
+  browserTimeout?: number
   captureDelay?: number
   viewportWidth?: number
   viewportHeight?: number
   headless?: boolean
+  closeBrowserAfterCapture?: boolean
   sendFailureMessage?: boolean
   proxyServer?: string
   proxyBypass?: string
@@ -84,10 +88,12 @@ export interface ResolvedConfig {
   executablePath: string
   userAgent: string
   navigationTimeout: number
+  browserTimeout: number
   captureDelay: number
   viewportWidth: number
   viewportHeight: number
   headless: boolean
+  closeBrowserAfterCapture: boolean
   sendFailureMessage: boolean
   proxyServer: string
   proxyBypass: string
@@ -130,6 +136,7 @@ interface Browser {
 interface BrowserLaunchOptions {
   executablePath: string
   headless: boolean
+  timeout?: number
   args: string[]
   proxy?: {
     server: string
@@ -241,10 +248,12 @@ export const Config: Schema<Config> = Schema.object({
   executablePath: Schema.string().description(TEXT.executablePath).default(''),
   userAgent: Schema.string().description(TEXT.userAgent).default(DEFAULT_USER_AGENT),
   navigationTimeout: Schema.number().description(TEXT.navigationTimeout).default(DEFAULT_TIMEOUT),
+  browserTimeout: Schema.number().description(TEXT.browserTimeout).default(DEFAULT_TIMEOUT),
   captureDelay: Schema.number().description(TEXT.captureDelay).default(DEFAULT_DELAY),
   viewportWidth: Schema.number().description(TEXT.viewportWidth).default(1280),
   viewportHeight: Schema.number().description(TEXT.viewportHeight).default(960),
   headless: Schema.boolean().description(TEXT.headless).default(true),
+  closeBrowserAfterCapture: Schema.boolean().description(TEXT.closeBrowserAfterCapture).default(false),
   sendFailureMessage: Schema.boolean().description(TEXT.sendFailureMessage).default(false),
   proxyServer: Schema.string().description(TEXT.proxyServer).default(''),
   proxyBypass: Schema.string().description(TEXT.proxyBypass).default(''),
@@ -924,10 +933,12 @@ export function resolveConfig(config: Config): ResolvedConfig {
     executablePath: config.executablePath?.trim() || '',
     userAgent: config.userAgent?.trim() || DEFAULT_USER_AGENT,
     navigationTimeout: config.navigationTimeout ?? DEFAULT_TIMEOUT,
+    browserTimeout: Math.max(0, config.browserTimeout ?? DEFAULT_TIMEOUT),
     captureDelay: config.captureDelay ?? DEFAULT_DELAY,
     viewportWidth: config.viewportWidth ?? 1280,
     viewportHeight: config.viewportHeight ?? 960,
     headless: config.headless ?? true,
+    closeBrowserAfterCapture: config.closeBrowserAfterCapture ?? false,
     sendFailureMessage: config.sendFailureMessage ?? false,
     proxyServer: config.proxyServer?.trim() || '',
     proxyBypass: config.proxyBypass?.trim() || '',
@@ -1456,6 +1467,7 @@ export function createBrowserLaunchOptions(config: ResolvedConfig, useProxy = tr
   const options: BrowserLaunchOptions = {
     executablePath: config.executablePath,
     headless: config.headless,
+    timeout: config.browserTimeout > 0 ? config.browserTimeout : 0,
     args: ['--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'],
   }
 
@@ -1554,19 +1566,38 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
 
   constructor(private readonly config: ResolvedConfig) {}
 
+  private memoizeBrowserTask(useProxy: boolean) {
+    const task = this.launch(useProxy).catch((error) => {
+      if (useProxy) this.proxyBrowserTask = undefined
+      else this.directBrowserTask = undefined
+      throw error
+    })
+
+    if (useProxy) this.proxyBrowserTask = task
+    else this.directBrowserTask = task
+    return task
+  }
+
   private async getBrowser(useProxy: boolean) {
     if (useProxy && this.config.proxyServer) {
-      this.proxyBrowserTask ||= this.launch(true)
-      return this.proxyBrowserTask
+      return this.proxyBrowserTask ||= this.memoizeBrowserTask(true)
     }
 
-    this.directBrowserTask ||= this.launch(false)
-    return this.directBrowserTask
+    return this.directBrowserTask ||= this.memoizeBrowserTask(false)
   }
 
   private async launch(useProxy: boolean) {
     const chromium = await loadChromium()
     return chromium.launch(createBrowserLaunchOptions(this.config, useProxy))
+  }
+
+  private async closeBrowser(useProxy: boolean) {
+    const task = useProxy && this.config.proxyServer ? this.proxyBrowserTask : this.directBrowserTask
+    if (useProxy && this.config.proxyServer) this.proxyBrowserTask = undefined
+    else this.directBrowserTask = undefined
+
+    const browser = await task?.catch(() => null)
+    if (browser) await browser.close().catch(() => null)
   }
 
   private async withPage<T>(browser: Browser, targetUrl: string | undefined, authenticated: boolean, callback: (page: BrowserPage) => Promise<T>) {
@@ -1593,38 +1624,45 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
     const authenticated = options.authenticated ?? true
     const useProxy = options.useProxy ?? !!this.config.proxyServer
     const browser = await this.getBrowser(useProxy)
-    const requestedPostNumber = extractRequestedPostNumber(url)
-    const opSourceUrl = createTopicPostUrl(url, this.config, 1)
-    const opSnapshot = await this.withPage(browser, opSourceUrl, authenticated, (page) => extractTopicFromPage(page, opSourceUrl, 1, this.config))
-    if (!opSnapshot.opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
 
-    let requestedPost: ExtractedDomPost | undefined
-    if (requestedPostNumber > 1) {
-      const replySourceUrl = createTopicPostUrl(url, this.config, requestedPostNumber)
-      const replySnapshot = await this.withPage(browser, replySourceUrl, authenticated, (page) => extractTopicFromPage(page, replySourceUrl, requestedPostNumber, this.config))
-      requestedPost = replySnapshot.requestedPost
-    }
+    try {
+      const requestedPostNumber = extractRequestedPostNumber(url)
+      const opSourceUrl = createTopicPostUrl(url, this.config, 1)
+      const opSnapshot = await this.withPage(browser, opSourceUrl, authenticated, (page) => extractTopicFromPage(page, opSourceUrl, 1, this.config))
+      if (!opSnapshot.opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
 
-    const baseOrigin = this.config.frontProxyEnabled && this.config.frontProxyOrigin ? this.config.frontProxyOrigin : this.config.forumOrigin
-    const { payload, sitePayload, opPost, requestedPost: requestedTopicPost } = buildRenderDataFromExtractedTopic(opSnapshot, requestedPost)
-    if (!opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
-    const html = renderTopicHtml(payload, opPost, requestedTopicPost, baseOrigin, sitePayload)
+      let requestedPost: ExtractedDomPost | undefined
+      if (requestedPostNumber > 1) {
+        const replySourceUrl = createTopicPostUrl(url, this.config, requestedPostNumber)
+        const replySnapshot = await this.withPage(browser, replySourceUrl, authenticated, (page) => extractTopicFromPage(page, replySourceUrl, requestedPostNumber, this.config))
+        requestedPost = replySnapshot.requestedPost
+      }
 
-    return this.withPage(browser, baseOrigin, authenticated, async (page) => {
-      await page.setContent(html, { waitUntil: 'load', timeout: this.config.navigationTimeout })
-      await page.evaluate((script) => new Function(script)(), SNAPSHOT_POST_PROCESS_SCRIPT)
-      if (this.config.captureDelay > 0) await page.waitForTimeout(this.config.captureDelay)
+      const baseOrigin = this.config.frontProxyEnabled && this.config.frontProxyOrigin ? this.config.frontProxyOrigin : this.config.forumOrigin
+      const { payload, sitePayload, opPost, requestedPost: requestedTopicPost } = buildRenderDataFromExtractedTopic(opSnapshot, requestedPost)
+      if (!opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
+      const html = renderTopicHtml(payload, opPost, requestedTopicPost, baseOrigin, sitePayload)
 
-      await page.evaluate((script) => new Function(script)(), DISCOURSE_WAIT_IMAGES_SCRIPT)
+      return this.withPage(browser, baseOrigin, authenticated, async (page) => {
+        await page.setContent(html, { waitUntil: 'load', timeout: this.config.navigationTimeout })
+        await page.evaluate((script) => new Function(script)(), SNAPSHOT_POST_PROCESS_SCRIPT)
+        if (this.config.captureDelay > 0) await page.waitForTimeout(this.config.captureDelay)
 
-      const buffer = await page.screenshot({
-        type: 'png',
-        fullPage: true,
-        timeout: this.config.navigationTimeout,
+        await page.evaluate((script) => new Function(script)(), DISCOURSE_WAIT_IMAGES_SCRIPT)
+
+        const buffer = await page.screenshot({
+          type: 'png',
+          fullPage: true,
+          timeout: this.config.navigationTimeout,
+        })
+
+        return Buffer.from(buffer)
       })
-
-      return Buffer.from(buffer)
-    })
+    } finally {
+      if (this.config.closeBrowserAfterCapture) {
+        await this.closeBrowser(useProxy)
+      }
+    }
   }
 
   async dispose() {

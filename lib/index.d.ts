@@ -13,10 +13,12 @@ export interface Config {
     executablePath?: string;
     userAgent?: string;
     navigationTimeout?: number;
+    browserTimeout?: number;
     captureDelay?: number;
     viewportWidth?: number;
     viewportHeight?: number;
     headless?: boolean;
+    closeBrowserAfterCapture?: boolean;
     sendFailureMessage?: boolean;
     proxyServer?: string;
     proxyBypass?: string;
@@ -36,10 +38,12 @@ export interface ResolvedConfig {
     executablePath: string;
     userAgent: string;
     navigationTimeout: number;
+    browserTimeout: number;
     captureDelay: number;
     viewportWidth: number;
     viewportHeight: number;
     headless: boolean;
+    closeBrowserAfterCapture: boolean;
     sendFailureMessage: boolean;
     proxyServer: string;
     proxyBypass: string;
@@ -54,6 +58,7 @@ interface BrowserCookie {
 interface BrowserLaunchOptions {
     executablePath: string;
     headless: boolean;
+    timeout?: number;
     args: string[];
     proxy?: {
         server: string;
@@ -136,8 +141,10 @@ export declare class PlaywrightDiscourseRenderer implements SnapshotRenderer {
     private proxyBrowserTask?;
     private directBrowserTask?;
     constructor(config: ResolvedConfig);
+    private memoizeBrowserTask;
     private getBrowser;
     private launch;
+    private closeBrowser;
     private withPage;
     capture(url: string, options?: CaptureOptions): Promise<Buffer<ArrayBuffer>>;
     dispose(): Promise<void>;

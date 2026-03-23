@@ -85,7 +85,10 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
       executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
       proxyServer: ' http://127.0.0.1:7890 ',
       proxyBypass: ' localhost,127.0.0.1 ',
-    })).to.have.property('proxyServer', 'http://127.0.0.1:7890')
+    })).to.include({
+      proxyServer: 'http://127.0.0.1:7890',
+      proxyBypass: 'localhost,127.0.0.1',
+    })
   })
 
   it('supports front proxy and browser proxy at the same time', () => {
@@ -133,6 +136,32 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
     })
 
     expect(createBrowserLaunchOptions(resolved).args).to.include('--dns-over-https-mode=automatic')
+  })
+
+  it('supports browser timeout and disable-timeout mode', () => {
+    const normal = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      browserTimeout: 45000,
+    })
+    const disabled = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      browserTimeout: 0,
+    })
+
+    expect(createBrowserLaunchOptions(normal).timeout).to.equal(45000)
+    expect(createBrowserLaunchOptions(disabled).timeout).to.equal(0)
+  })
+
+  it('supports closeBrowserAfterCapture config', () => {
+    const resolved = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      closeBrowserAfterCapture: true,
+    })
+
+    expect(resolved.closeBrowserAfterCapture).to.equal(true)
   })
 
   it('supports legacy cookieHeader as fallback source for _t', () => {
