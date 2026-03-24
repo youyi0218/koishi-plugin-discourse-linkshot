@@ -22,6 +22,7 @@ import {
   resolveCategoryLabel,
   resolveConfig,
   rewriteUrlWithFrontProxy,
+  selectCommentPosts,
   type SnapshotRenderer,
 } from '../src'
 
@@ -182,6 +183,21 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
     expect(resolved.closeBrowserAfterCapture).to.equal(true)
   })
 
+  it('supports optional comment window config', () => {
+    const normal = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    })
+    const custom = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\Program Files\Google\Chrome\Application\chrome.exe',
+      commentWindowCount: 4,
+    })
+
+    expect(normal.commentWindowCount).to.equal(undefined)
+    expect(custom.commentWindowCount).to.equal(4)
+  })
+
   it('launches isolated browsers when closeBrowserAfterCapture is enabled', async () => {
     const resolved = resolveConfig({
       forumOrigin: 'https://forum.example.com',
@@ -239,6 +255,30 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
     expect(extractRequestedPostNumber('https://forum.example.com/t/topic/1790348/41')).to.equal(41)
     expect(extractRequestedPostNumber('https://forum.example.com/t/topic/1790348#post_9')).to.equal(9)
     expect(extractRequestedPostNumber('https://forum.example.com/t/topic/1790348')).to.equal(1)
+  })
+
+  it('selects leading comments for topic links when comment window is configured', () => {
+    const posts = Array.from({ length: 8 }, (_, index) => ({ post_number: index + 1 }))
+
+    expect(selectCommentPosts(posts, 1, 3).map((post) => post.post_number)).to.deep.equal([2, 3, 4])
+  })
+
+  it('selects a symmetric comment window around the requested floor', () => {
+    const posts = Array.from({ length: 8 }, (_, index) => ({ post_number: index + 1 }))
+
+    expect(selectCommentPosts(posts, 5, 4).map((post) => post.post_number)).to.deep.equal([3, 4, 5, 6, 7])
+  })
+
+  it('falls back to only the requested floor when comment window is empty', () => {
+    const posts = Array.from({ length: 8 }, (_, index) => ({ post_number: index + 1 }))
+
+    expect(selectCommentPosts(posts, 6).map((post) => post.post_number)).to.deep.equal([6])
+  })
+
+  it('shifts the comment window near topic boundaries', () => {
+    const posts = Array.from({ length: 8 }, (_, index) => ({ post_number: index + 1 }))
+
+    expect(selectCommentPosts(posts, 8, 5).map((post) => post.post_number)).to.deep.equal([4, 5, 6, 7, 8])
   })
 
   it('creates topic json urls', () => {

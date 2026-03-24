@@ -12,6 +12,7 @@ const TEXT = {
   pageWaitUntil: '\u9875\u9762\u52a0\u8f7d\u5b8c\u6210\u7684\u5224\u5b9a\u65b9\u5f0f\uff1b\u9ed8\u8ba4 domcontentloaded \uff0c\u9047\u5230 load \u8d85\u65f6\u65f6\u5efa\u8bae\u4f7f\u7528\u8fd9\u4e2a\u3002',
   browserTimeout: '\u6d4f\u89c8\u5668\u542f\u52a8 / \u5efa\u8fde\u8d85\u65f6\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c0 \u8868\u793a\u4e0d\u68c0\u6d4b\u8d85\u65f6\u3002',
   captureDelay: '\u751f\u6210\u622a\u56fe\u524d\u989d\u5916\u7b49\u5f85\u7684\u65f6\u95f4\uff08\u6beb\u79d2\uff09\uff0c\u7528\u4e8e\u7b49\u5f85\u56fe\u7247\u8d44\u6e90\u5b8c\u6210\u52a0\u8f7d\u3002',
+  commentWindowCount: '\u989d\u5916\u9644\u5e26\u7684\u8bc4\u8bba\u697c\u5c42\u6570\uff1b\u7559\u7a7a\u5219\u4fdd\u6301\u9ed8\u8ba4\u884c\u4e3a\uff0c\u586b\u5199\u540e\u4f1a\u6309\u697c\u5c42\u622a\u53d6\u5bf9\u5e94\u6570\u91cf\u7684\u8bc4\u8bba\u3002',
   viewportWidth: '\u622a\u56fe\u6d4f\u89c8\u5668\u89c6\u53e3\u5bbd\u5ea6\u3002',
   viewportHeight: '\u622a\u56fe\u6d4f\u89c8\u5668\u89c6\u53e3\u9ad8\u5ea6\u3002',
   headless: '\u662f\u5426\u4ee5\u65e0\u5934\u6a21\u5f0f\u542f\u52a8\u6d4f\u89c8\u5668\u3002',
@@ -57,6 +58,7 @@ export interface Config {
   pageWaitUntil?: BrowserWaitUntil
   browserTimeout?: number
   captureDelay?: number
+  commentWindowCount?: number
   viewportWidth?: number
   viewportHeight?: number
   headless?: boolean
@@ -81,6 +83,7 @@ export interface ResolvedConfig {
   pageWaitUntil: BrowserWaitUntil
   browserTimeout: number
   captureDelay: number
+  commentWindowCount?: number
   viewportWidth: number
   viewportHeight: number
   headless: boolean
@@ -213,10 +216,12 @@ interface ExtractedDomTopic {
   title: string
   tags: string[]
   viewCount: number
+  postCount: number
   likeCount: number
   category?: ExtractedDomCategory
   opPost?: ExtractedDomPost
   requestedPost?: ExtractedDomPost
+  posts: ExtractedDomPost[]
 }
 
 export interface CaptureOptions {
@@ -245,6 +250,7 @@ export const Config: Schema<Config> = Schema.object({
   ]).role('radio').default('domcontentloaded').description(TEXT.pageWaitUntil),
   browserTimeout: Schema.number().description(TEXT.browserTimeout).default(DEFAULT_TIMEOUT),
   captureDelay: Schema.number().description(TEXT.captureDelay).default(DEFAULT_DELAY),
+  commentWindowCount: Schema.natural().min(1).description(TEXT.commentWindowCount),
   viewportWidth: Schema.number().description(TEXT.viewportWidth).default(1280),
   viewportHeight: Schema.number().description(TEXT.viewportHeight).default(960),
   headless: Schema.boolean().description(TEXT.headless).default(true),
@@ -476,25 +482,60 @@ const DISCOURSE_DOM_EXTRACT_SCRIPT = String.raw`
   const clean = (value) => (value || '').replace(/\s+/g, ' ').trim()
   const text = (node) => clean(node?.textContent)
   const attr = (node, name) => clean(node?.getAttribute(name))
+  const expandCompactNumber = (source) => {
+    const compactMatch = source.match(/^(\d+(?:\.\d+)?)\s*(k|m|b|w|\u4e07|\u5104|\u4ebf)?$/i)
+    if (!compactMatch) return 0
+
+    const base = Number(compactMatch[1])
+    const unit = (compactMatch[2] || '').toLowerCase()
+    const multiplier = unit === 'k' ? 1e3
+      : unit === 'm' ? 1e6
+      : unit === 'b' ? 1e9
+      : unit === 'w' || unit === '\u4e07' ? 1e4
+      : unit === '\u5104' || unit === '\u4ebf' ? 1e8
+      : 1
+    return Number.isFinite(base) ? Math.round(base * multiplier) : 0
+  }
+  const parseStandaloneNumber = (value) => {
+    const source = clean(String(value || '')).replace(/,/g, '')
+    if (!source) return 0
+
+    const normalized = source
+      .replace(/^(?:about|approximately|approx\.?|\u7ea6|\u5927\u7ea6)\s+/i, '')
+      .replace(/\s*(?:\u4f4d|\u4eba|\u4e2a)?\s*(?:\u70b9\u8d5e|\u8d5e\u540c|\u8d5e|\u53cd\u5e94|\u56de\u5e94|likes?|reactions?|views?|\u6d4f\u89c8|\u6b21\u6d4f\u89c8|\u6b21\u67e5\u770b|\u67e5\u770b)?$/i, '')
+      .trim()
+
+    return expandCompactNumber(normalized)
+  }
   const parseNumber = (value) => {
-    const digits = (value || '').replace(/[^\d]/g, '')
-    return digits ? Number(digits) : 0
+    const source = clean(String(value || '')).replace(/,/g, '')
+    if (!source) return 0
+
+    const standalone = expandCompactNumber(source)
+    if (standalone) return standalone
+
+    const numericMatch = source.match(/\d+(?:\.\d+)?/)
+    if (!numericMatch) return 0
+    const numeric = Number(numericMatch[0])
+    return Number.isFinite(numeric) ? Math.round(numeric) : 0
   }
   const cssVar = (node, name) => clean(node?.getAttribute('style')?.match(new RegExp(name + ':\\s*([^;]+)'))?.[1]) || clean(node ? getComputedStyle(node).getPropertyValue(name) : '')
   const parsePostNumber = (article) => parseNumber(article?.id || article?.getAttribute('data-post-number') || '')
   const getLikeCount = (article) => {
     if (!article) return 0
-    const counters = Array.from(article.querySelectorAll('.discourse-reactions-counter'))
-    let max = 0
-    for (const counter of counters) {
-      max = Math.max(
-        max,
-        parseNumber(text(counter.querySelector('.reactions-counter'))),
-        parseNumber(attr(counter, 'aria-label')),
-        parseNumber(text(counter)),
-      )
-    }
-    return max
+
+    const reactionSpanTotal = Array.from(article.querySelectorAll('.discourse-reactions-counter .reactions-counter'))
+      .map((node) => parseStandaloneNumber(attr(node, 'data-value')) || parseStandaloneNumber(text(node)))
+      .filter(Boolean)
+      .reduce((sum, count) => sum + count, 0)
+
+    const fallbackValues = [
+      parseStandaloneNumber(attr(article, 'data-like-count')),
+      parseStandaloneNumber(attr(article.querySelector('[data-like-count]'), 'data-like-count')),
+      parseStandaloneNumber(text(article.querySelector('.like-count, .who-liked, .toggle-like .d-button-label, button.toggle-like .d-button-label'))),
+    ]
+
+    return Math.max(reactionSpanTotal, ...fallbackValues, 0)
   }
   const getReplyCount = (article) => {
     const wrapper = article?.closest('.topic-post')
@@ -521,9 +562,29 @@ const DISCOURSE_DOM_EXTRACT_SCRIPT = String.raw`
       replyToPostNumber: null,
     }
   }
+  const getPostCount = (articles, topicMap) => {
+    const candidates = articles.map(parsePostNumber)
+    const counterNodes = document.querySelectorAll('[data-highest-post-number], [data-topic-post-count], [data-post-count], #topic-progress-wrapper [aria-valuemax], .timeline-scrollarea[aria-valuemax], .timeline-handle[aria-valuemax]')
+    for (const element of Array.from(counterNodes)) {
+      candidates.push(parseNumber(
+        attr(element, 'data-highest-post-number')
+        || attr(element, 'data-topic-post-count')
+        || attr(element, 'data-post-count')
+        || attr(element, 'aria-valuemax')
+      ))
+    }
+
+    const topicMapPostCount = parseNumber(
+      text(topicMap?.querySelector('.topic-map__posts-trigger .number, .topic-map-post-links .number, .topic-map-posts .number, .posts-map .number'))
+      || text(topicMap?.querySelector('.topic-map__posts-trigger, .topic-map-post-links, .topic-map-posts, .posts-map'))
+    )
+    if (topicMapPostCount) candidates.push(topicMapPostCount)
+
+    return Math.max(0, ...candidates)
+  }
 
   if (document.querySelector('.page-not-found')) {
-    return { title: '', tags: [], viewCount: 0, likeCount: 0, error: text(document.querySelector('.page-not-found .heading, .page-not-found')) || '\u627e\u4e0d\u5230\u9875\u9762\u6216\u5f53\u524d\u8d26\u53f7\u65e0\u6743\u8bbf\u95ee\u8be5\u5e16\u5b50\u3002' }
+    return { title: '', tags: [], viewCount: 0, likeCount: 0, error: '\u627e\u4e0d\u5230\u9875\u9762\u6216\u5f53\u524d\u8d26\u53f7\u65e0\u6743\u8bbf\u95ee\u8be5\u5e16\u5b50\u3002' }
   }
 
   const routePath = (location.pathname || '').toLowerCase()
@@ -544,14 +605,30 @@ const DISCOURSE_DOM_EXTRACT_SCRIPT = String.raw`
   const categoryName = text(categoryElement?.querySelector('.badge-category__name')) || text(categoryElement)
   const tags = [...new Set(Array.from(document.querySelectorAll('.discourse-tag, a.discourse-tag')).map((element) => text(element)).filter(Boolean))]
   const topicMap = document.querySelector('.topic-map')
-  const opArticle = document.querySelector('article#post_1')
-  const requestedArticle = requestedPostNumber > 1 ? document.querySelector('#post_' + requestedPostNumber) : undefined
+  const articles = Array.from(document.querySelectorAll('article[id^="post_"]'))
+  const posts = articles
+    .map(getPost)
+    .filter((post) => post && post.postNumber > 0)
+    .sort((left, right) => left.postNumber - right.postNumber)
+  const opArticle = articles.find((article) => parsePostNumber(article) === 1)
+  const requestedArticle = requestedPostNumber > 1
+    ? articles.find((article) => parsePostNumber(article) === requestedPostNumber)
+    : undefined
 
   return {
     title,
     tags,
-    viewCount: parseNumber(text(topicMap?.querySelector('.topic-map__views-trigger .number')) || text(topicMap?.querySelector('.topic-map__views-trigger'))),
-    likeCount: parseNumber(text(topicMap?.querySelector('.topic-map__likes-trigger .number')) || text(topicMap?.querySelector('.topic-map__likes-trigger'))),
+    viewCount: parseNumber(
+      attr(topicMap?.querySelector('.topic-map__views-trigger .number, .topic-map__views-trigger'), 'data-value')
+      || text(topicMap?.querySelector('.topic-map__views-trigger .number'))
+      || text(topicMap?.querySelector('.topic-map__views-trigger'))
+    ),
+    postCount: getPostCount(articles, topicMap),
+    likeCount: parseNumber(
+      attr(topicMap?.querySelector('.topic-map__likes-trigger .number, .topic-map__likes-trigger'), 'data-value')
+      || text(topicMap?.querySelector('.topic-map__likes-trigger .number'))
+      || text(topicMap?.querySelector('.topic-map__likes-trigger'))
+    ),
     category: categoryName ? {
       name: categoryName,
       color: cssVar(categoryElement, '--category-badge-color'),
@@ -559,6 +636,7 @@ const DISCOURSE_DOM_EXTRACT_SCRIPT = String.raw`
     } : undefined,
     opPost: getPost(opArticle),
     requestedPost: getPost(requestedArticle),
+    posts,
   }
 `
 
@@ -897,6 +975,12 @@ function createSiteJsonUrl(config: ResolvedConfig) {
   }
 }
 
+function normalizeOptionalPositiveInteger(value?: number) {
+  if (value == null || value === '') return undefined
+  const normalized = Math.trunc(Number(value))
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : undefined
+}
+
 export function resolveConfig(config: Config): ResolvedConfig {
   const forumOrigin = normalizeOrigin(config.forumOrigin)
   const frontProxyOrigin = normalizeOrigin(config.frontProxyOrigin)
@@ -915,6 +999,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     pageWaitUntil: config.pageWaitUntil ?? 'domcontentloaded',
     browserTimeout: Math.max(0, config.browserTimeout ?? DEFAULT_TIMEOUT),
     captureDelay: config.captureDelay ?? DEFAULT_DELAY,
+    commentWindowCount: normalizeOptionalPositiveInteger(config.commentWindowCount),
     viewportWidth: config.viewportWidth ?? 1280,
     viewportHeight: config.viewportHeight ?? 960,
     headless: config.headless ?? true,
@@ -932,13 +1017,49 @@ export async function sendSnapshot(session: Session, buffer: Buffer) {
   await session.send(h('img', { src }))
 }
 
-function selectOpPost(payload: TopicPayload) {
-  return payload.post_stream?.posts?.find((post) => post.post_number === 1) || payload.post_stream?.posts?.[0]
+function sortPostsByNumber(posts: TopicPost[]) {
+  return [...posts].sort((left, right) => (left.post_number ?? 0) - (right.post_number ?? 0))
 }
 
-function selectRequestedPost(payload: TopicPayload, requestedPostNumber: number) {
-  if (requestedPostNumber <= 1) return undefined
-  return payload.post_stream?.posts?.find((post) => post.post_number === requestedPostNumber)
+export function selectCommentPosts(posts: TopicPost[] | undefined, requestedPostNumber: number, commentWindowCount?: number) {
+  const replyPosts = sortPostsByNumber((posts || []).filter((post) => (post.post_number ?? 0) > 1))
+  const normalizedWindow = normalizeOptionalPositiveInteger(commentWindowCount)
+
+  if (!normalizedWindow) {
+    if (requestedPostNumber <= 1) return []
+    return replyPosts.filter((post) => post.post_number === requestedPostNumber).slice(0, 1)
+  }
+
+  if (!replyPosts.length) return []
+
+  if (requestedPostNumber <= 1) {
+    return replyPosts.slice(0, normalizedWindow)
+  }
+
+  const targetIndex = replyPosts.findIndex((post) => post.post_number === requestedPostNumber)
+  if (targetIndex < 0) return []
+
+  const expectedSize = normalizedWindow % 2 === 0 ? normalizedWindow + 1 : normalizedWindow
+  const finalSize = Math.min(expectedSize, replyPosts.length)
+  const half = Math.floor(finalSize / 2)
+  let start = targetIndex - half
+  let end = targetIndex + half
+
+  if (start < 0) {
+    end = Math.min(replyPosts.length - 1, end - start)
+    start = 0
+  }
+
+  if (end > replyPosts.length - 1) {
+    const overflow = end - (replyPosts.length - 1)
+    start = Math.max(0, start - overflow)
+    end = replyPosts.length - 1
+  }
+
+  while (end - start + 1 < finalSize && start > 0) start -= 1
+  while (end - start + 1 < finalSize && end < replyPosts.length - 1) end += 1
+
+  return replyPosts.slice(start, end + 1)
 }
 
 export function getPostLikeCount(post: TopicPost, fallback = 0) {
@@ -1040,8 +1161,8 @@ function renderTopicAuthorHeader(post: TopicPost, baseOrigin: string) {
     </section>`
 }
 
-function renderCommentSection(post: TopicPost | undefined, baseOrigin: string) {
-  if (!post || !post.post_number || post.post_number <= 1) return ''
+function renderCommentCard(post: TopicPost, baseOrigin: string) {
+  if (!post.post_number || post.post_number <= 1) return ''
 
   const avatar = resolveAvatarUrl(post, baseOrigin)
   const displayNameText = getDisplayName(post)
@@ -1052,15 +1173,10 @@ function renderCommentSection(post: TopicPost | undefined, baseOrigin: string) {
   const createdAt = formatDateTime(post.created_at)
   const likeCount = formatNumber(getPostLikeCount(post))
   const replyCount = formatNumber(post.reply_count ?? 0)
-  const replyTo = post.reply_to_post_number ? `<span class="comment-pill">\u56de\u590d #${post.reply_to_post_number}</span>` : ''
-  const cooked = post.cooked || '<p>\u8be5\u697c\u5c42\u6682\u65e0\u53ef\u5c55\u793a\u5185\u5bb9\u3002</p>'
+  const replyTo = post.reply_to_post_number ? `<span class="comment-pill">回复 #${post.reply_to_post_number}</span>` : ''
+  const cooked = post.cooked || '<p>该楼层暂无可展示内容。</p>'
 
   return `
-    <section class="comment-section">
-      <div class="section-heading">
-        <span class="section-kicker">\u5173\u8054\u697c\u5c42</span>
-        <h2>#${post.post_number}</h2>
-      </div>
       <article class="comment-card">
         <header class="comment-header">
           <div class="comment-author">
@@ -1071,30 +1187,47 @@ function renderCommentSection(post: TopicPost | undefined, baseOrigin: string) {
                 ${username}
               </div>
               <div class="comment-meta-row">
-                <span class="comment-pill">\u53d1\u8868\u4e8e ${escapeHtml(createdAt)}</span>
+                <span class="comment-pill comment-floor-pill">#${post.post_number}</span>
+                <span class="comment-pill">发表于 ${escapeHtml(createdAt)}</span>
                 ${replyTo}
               </div>
             </div>
           </div>
           <div class="comment-stats">
-            ${renderCommentStat('\u56de\u590d', replyCount)}
-            ${renderCommentStat('\u70b9\u8d5e', likeCount)}
+            ${renderCommentStat('回复', replyCount)}
+            ${renderCommentStat('点赞', likeCount)}
           </div>
         </header>
         <div class="post comment-body" data-snapshot-post-body="comment">${cooked}</div>
-      </article>
+      </article>`
+}
+
+function renderCommentSections(posts: TopicPost[], baseOrigin: string) {
+  const commentPosts = posts.filter((post) => (post.post_number ?? 0) > 1)
+  if (!commentPosts.length) return ''
+
+  return `
+    <section class="comment-section">
+      <div class="section-heading">
+        <span class="section-kicker">相关评论</span>
+        <h2>共 ${commentPosts.length} 条</h2>
+      </div>
+      <div class="comment-list">
+        ${commentPosts.map((post) => renderCommentCard(post, baseOrigin)).join('')}
+      </div>
     </section>`
 }
 
-function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, requestedPost: TopicPost | undefined, baseOrigin: string, sitePayload?: SitePayload) {
+function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, commentPosts: TopicPost[], baseOrigin: string, sitePayload?: SitePayload) {
   const title = escapeHtml(payload.title || 'Discourse Topic')
   const cooked = opPost.cooked || '<p>\u672a\u83b7\u53d6\u5230\u697c\u4e3b\u6b63\u6587\u3002</p>'
   const viewCount = payload.views ?? 0
-  const likeCount = getPostLikeCount(opPost, payload.like_count ?? 0)
+  const postCount = payload.posts_count ?? 0
+  const likeCount = getPostLikeCount(opPost)
   const createdAt = formatDateTime(opPost.created_at)
   const badges = renderTopicBadges(payload, sitePayload)
   const topicAuthorHeader = renderTopicAuthorHeader(opPost, baseOrigin)
-  const commentSection = renderCommentSection(requestedPost, baseOrigin)
+  const commentSection = renderCommentSections(commentPosts, baseOrigin)
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1322,7 +1455,7 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, requestedPost
     .snapshot-link-reference-url { color: #9a3412; word-break: break-all; }
     .summary {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 14px;
       margin-top: 22px;
     }
@@ -1332,6 +1465,7 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, requestedPost
     .comment-section { margin-top: 28px; }
     .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
     .section-heading h2 { margin: 8px 0 0; font-family: var(--serif); font-size: 24px; color: #1f1a17; }
+    .comment-list { display: grid; gap: 16px; }
     .comment-card { border-radius: 22px; border: 1px solid rgba(120, 53, 15, 0.13); background: rgba(255, 252, 247, 0.94); padding: 18px; }
     .comment-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
     .comment-author { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
@@ -1371,8 +1505,9 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, requestedPost
       </section>
       <section class="summary">
         ${renderStatCard('\u6d4f\u89c8\u91cf', formatNumber(viewCount))}
+        ${renderStatCard('\u603b\u697c\u5c42', formatNumber(postCount))}
         ${renderStatCard('\u53d1\u5e16\u65f6\u95f4', createdAt)}
-        ${renderStatCard('\u70b9\u8d5e\u91cf', formatNumber(likeCount))}
+        ${renderStatCard('\u9996\u697c\u70b9\u8d5e', formatNumber(likeCount))}
       </section>
       ${commentSection}
     </section>
@@ -1416,11 +1551,27 @@ function toTopicPost(post: ExtractedDomPost | undefined): TopicPost | undefined 
   }
 }
 
-function buildRenderDataFromExtractedTopic(snapshot: ExtractedDomTopic, requestedPost?: ExtractedDomPost) {
+function toTopicPosts(posts: ExtractedDomPost[] | undefined) {
+  return (posts || []).map((post) => toTopicPost(post)).filter((post): post is TopicPost => !!post)
+}
+
+function mergeExtractedPosts(...postGroups: Array<ExtractedDomPost[] | undefined>) {
+  const merged = new Map<number, ExtractedDomPost>()
+  for (const group of postGroups) {
+    for (const post of group || []) {
+      if (!post?.postNumber) continue
+      merged.set(post.postNumber, post)
+    }
+  }
+  return [...merged.values()].sort((left, right) => left.postNumber - right.postNumber)
+}
+
+function buildRenderDataFromExtractedTopic(snapshot: ExtractedDomTopic) {
   const categoryId = snapshot.category?.name ? 1 : undefined
   const payload: TopicPayload = {
     title: snapshot.title,
     views: snapshot.viewCount,
+    posts_count: snapshot.postCount,
     like_count: snapshot.likeCount,
     tags: snapshot.tags,
     category_id: categoryId,
@@ -1439,7 +1590,6 @@ function buildRenderDataFromExtractedTopic(snapshot: ExtractedDomTopic, requeste
     payload,
     sitePayload,
     opPost: toTopicPost(snapshot.opPost),
-    requestedPost: toTopicPost(requestedPost),
   }
 }
 
@@ -1618,17 +1768,21 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
       const opSnapshot = await this.withPage(browser, opSourceUrl, authenticated, (page) => extractTopicFromPage(page, opSourceUrl, 1, this.config))
       if (!opSnapshot.opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
 
-      let requestedPost: ExtractedDomPost | undefined
+      let focusSnapshot: ExtractedDomTopic | undefined
       if (requestedPostNumber > 1) {
         const replySourceUrl = createTopicPostUrl(url, this.config, requestedPostNumber)
-        const replySnapshot = await this.withPage(browser, replySourceUrl, authenticated, (page) => extractTopicFromPage(page, replySourceUrl, requestedPostNumber, this.config))
-        requestedPost = replySnapshot.requestedPost
+        focusSnapshot = await this.withPage(browser, replySourceUrl, authenticated, (page) => extractTopicFromPage(page, replySourceUrl, requestedPostNumber, this.config))
       }
 
+      const mergedPosts = mergeExtractedPosts(opSnapshot.posts, focusSnapshot?.posts)
+      const commentPosts = selectCommentPosts(toTopicPosts(mergedPosts), requestedPostNumber, this.config.commentWindowCount)
       const baseOrigin = this.config.frontProxyEnabled && this.config.frontProxyOrigin ? this.config.frontProxyOrigin : this.config.forumOrigin
-      const { payload, sitePayload, opPost, requestedPost: requestedTopicPost } = buildRenderDataFromExtractedTopic(opSnapshot, requestedPost)
+      const { payload, sitePayload, opPost } = buildRenderDataFromExtractedTopic({
+        ...opSnapshot,
+        postCount: Math.max(opSnapshot.postCount ?? 0, focusSnapshot?.postCount ?? 0),
+      })
       if (!opPost) throw new Error('\u672a\u4ece Discourse \u9875\u9762\u4e2d\u83b7\u53d6\u5230\u697c\u4e3b\u9996\u5e16\u3002')
-      const html = renderTopicHtml(payload, opPost, requestedTopicPost, baseOrigin, sitePayload)
+      const html = renderTopicHtml(payload, opPost, commentPosts, baseOrigin, sitePayload)
 
       return this.withPage(browser, baseOrigin, authenticated, async (page) => {
         await page.setContent(html, { waitUntil: this.config.pageWaitUntil, timeout: this.config.navigationTimeout })
