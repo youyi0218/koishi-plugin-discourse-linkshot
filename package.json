@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "koishi-plugin-discourse-linkshot",
   "description": "Render Discourse topic links into chat-friendly snapshots.",
   "version": "1.0.5",
@@ -36,7 +36,7 @@
     "browser": false,
     "category": "tool",
     "description": {
-      "zh": "鑷姩璇嗗埆 Discourse 璇濋閾炬帴骞跺彂閫侀妤?鎸囧畾妤煎眰鎴浘銆?,
+      "zh": "自动识别 Discourse 帖子链接并生成聊天截图预览。",
       "en": "Capture Discourse topic links into shareable snapshots for chat."
     }
   },
@@ -51,4 +51,3 @@
     "koishi": "^4.18.11"
   }
 }
-
