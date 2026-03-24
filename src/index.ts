@@ -5,8 +5,6 @@ const TEXT = {
   forumOrigin: '\u8bba\u575b\u4e3b\u7ad9\u5730\u5740\uff0c\u4f8b\u5982 https://forum.example.com',
   frontProxyEnabled: '\u662f\u5426\u542f\u7528\u8bbf\u95ee\u8bba\u575b\u7684\u524d\u7f6e\u57df\u4ee3\u7406\uff0c\u53ef\u4e0e proxyServer \u540c\u65f6\u5f00\u542f\u3002',
   frontProxyOrigin: '\u524d\u7f6e\u57df\u4ee3\u7406\u5730\u5740\uff0c\u4f8b\u5982 https://forum-proxy.example.com\uff1b\u542f\u7528\u540e\u4f1a\u628a forumOrigin \u7684\u94fe\u63a5\u6539\u5199\u5230\u8fd9\u91cc\u8bbf\u95ee\u3002',
-  allowedHosts: '\u5141\u8bb8\u89e6\u53d1\u622a\u56fe\u7684\u57df\u540d\u5217\u8868\uff1b\u4e3a\u7a7a\u65f6\u4f1a\u81ea\u52a8\u5305\u542b forumOrigin \u5bf9\u5e94\u57df\u540d\u3002',
-  allowSubdomains: '\u662f\u5426\u5141\u8bb8\u5339\u914d\u4e0a\u8ff0\u57df\u540d\u7684\u5b50\u57df\u540d\u3002',
   tCookie: '\u767b\u5f55 Cookie \u4e2d _t \u7684\u503c\uff1b\u65e2\u53ef\u4ee5\u76f4\u63a5\u586b _t \u7684\u5185\u5bb9\uff0c\u4e5f\u53ef\u4ee5\u7c98\u8d34\u5b8c\u6574 Cookie \u5934\uff0c\u63d2\u4ef6\u4f1a\u81ea\u52a8\u63d0\u53d6 _t \u5e76\u4e00\u5e76\u6ce8\u5165\u5176\u4ed6 Cookie\u3002',
   executablePath: '\u6d4f\u89c8\u5668\u53ef\u6267\u884c\u6587\u4ef6\u8def\u5f84\uff0c\u586b\u5199\u672c\u673a Chrome / Edge \u7684\u5b8c\u6574\u8def\u5f84\u3002',
   userAgent: '\u622a\u56fe\u8bbf\u95ee\u8bba\u575b\u65f6\u4f7f\u7528\u7684 User-Agent\u3002',
@@ -51,8 +49,6 @@ export interface Config {
   forumOrigin?: string
   frontProxyEnabled?: boolean
   frontProxyOrigin?: string
-  allowedHosts?: string[]
-  allowSubdomains?: boolean
   tCookie?: string
   cookieHeader?: string
   executablePath?: string
@@ -77,8 +73,6 @@ export interface ResolvedConfig {
   forumOrigin: string
   frontProxyEnabled: boolean
   frontProxyOrigin: string
-  allowedHosts: string[]
-  allowSubdomains: boolean
   tCookie: string
   authCookieSource: string
   executablePath: string
@@ -240,16 +234,14 @@ export const Config: Schema<Config> = Schema.object({
   forumOrigin: Schema.string().description(TEXT.forumOrigin).default(''),
   frontProxyEnabled: Schema.boolean().description(TEXT.frontProxyEnabled).default(false),
   frontProxyOrigin: Schema.string().description(TEXT.frontProxyOrigin).default(''),
-  allowedHosts: Schema.array(String).description(TEXT.allowedHosts).default([]),
-  allowSubdomains: Schema.boolean().description(TEXT.allowSubdomains).default(false),
   tCookie: Schema.string().role('secret').description(TEXT.tCookie).default(''),
   executablePath: Schema.string().description(TEXT.executablePath).default(''),
   userAgent: Schema.string().description(TEXT.userAgent).default(DEFAULT_USER_AGENT),
   navigationTimeout: Schema.number().description(TEXT.navigationTimeout).default(DEFAULT_TIMEOUT),
   pageWaitUntil: Schema.union([
     Schema.const('domcontentloaded').description('推荐：页面主结构就绪后继续抓取。'),
-    Schema.const('load').description('等待页面 load 事件，更完整但更容易超时。'),
-    Schema.const('networkidle').description('等待网络基本空闲，最慢。'),
+    Schema.const('load').description('等待 load 事件；若超时建议改用 domcontentloaded。'),
+    Schema.const('networkidle').description('等待网络空闲；适合静态页面，不适合长连接站点。'),
   ]).role('radio').default('domcontentloaded').description(TEXT.pageWaitUntil),
   browserTimeout: Schema.number().description(TEXT.browserTimeout).default(DEFAULT_TIMEOUT),
   captureDelay: Schema.number().description(TEXT.captureDelay).default(DEFAULT_DELAY),
@@ -579,10 +571,6 @@ export function normalizeOrigin(value?: string) {
   }
 }
 
-export function normalizeHost(value: string) {
-  return value.trim().toLowerCase()
-}
-
 export function trimUrlCandidate(value: string) {
   return value.replace(TRAILING_PUNCTUATION, '')
 }
@@ -719,12 +707,6 @@ function normalizeColor(value?: string, fallback = '#1f2937') {
   return source && /^[\da-fA-F]{3,8}$/.test(source) ? `#${source}` : fallback
 }
 
-export function matchesAllowedHost(targetUrl: string, config: ResolvedConfig) {
-  if (!config.allowedHosts.length) return false
-  const hostname = new URL(targetUrl).hostname.toLowerCase()
-  return config.allowedHosts.some((allowedHost) => hostname === allowedHost || (config.allowSubdomains && hostname.endsWith(`.${allowedHost}`)))
-}
-
 export function matchesForumOrigin(targetUrl: string, config: ResolvedConfig) {
   if (!config.forumOrigin) return false
   return targetUrl === config.forumOrigin
@@ -736,7 +718,7 @@ export function matchesForumOrigin(targetUrl: string, config: ResolvedConfig) {
 export function pickTargetUrl(session: Session, config: ResolvedConfig) {
   const content = session.content || session.elements?.join('') || ''
   const urls = extractUrls(content)
-  return urls.find((url) => matchesForumOrigin(url, config) || matchesAllowedHost(url, config))
+  return urls.find((url) => matchesForumOrigin(url, config))
 }
 
 export function extractRequestedPostNumber(targetUrl: string) {
@@ -806,7 +788,7 @@ export function getCookieOrigins(config: ResolvedConfig, targetUrl?: string) {
   if (config.frontProxyEnabled) appendOrigin(config.frontProxyOrigin)
 
   const targetOrigin = normalizeOrigin(targetUrl)
-  if (targetOrigin && (matchesForumOrigin(targetOrigin, config) || matchesAllowedHost(targetOrigin, config))) {
+  if (targetOrigin && matchesForumOrigin(targetOrigin, config)) {
     appendOrigin(targetOrigin)
   }
 
@@ -918,9 +900,6 @@ function createSiteJsonUrl(config: ResolvedConfig) {
 export function resolveConfig(config: Config): ResolvedConfig {
   const forumOrigin = normalizeOrigin(config.forumOrigin)
   const frontProxyOrigin = normalizeOrigin(config.frontProxyOrigin)
-  const forumHost = forumOrigin ? new URL(forumOrigin).hostname.toLowerCase() : ''
-  const allowedHosts = [...new Set([...(config.allowedHosts?.map(normalizeHost) || []), forumHost].filter(Boolean))]
-
   const authCookieSource = (config.tCookie || config.cookieHeader || '').trim()
 
   return {
@@ -928,8 +907,6 @@ export function resolveConfig(config: Config): ResolvedConfig {
     forumOrigin,
     frontProxyEnabled: config.frontProxyEnabled ?? false,
     frontProxyOrigin,
-    allowedHosts,
-    allowSubdomains: config.allowSubdomains ?? false,
     tCookie: extractTCookie(authCookieSource),
     authCookieSource,
     executablePath: config.executablePath?.trim() || '',
@@ -1471,7 +1448,13 @@ export function createBrowserLaunchOptions(config: ResolvedConfig, useProxy = tr
     executablePath: config.executablePath,
     headless: config.headless,
     timeout: config.browserTimeout > 0 ? config.browserTimeout : 0,
-    args: ['--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'],
+    args: [
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-vulkan',
+      '--use-gl=swiftshader',
+      '--no-first-run',
+    ],
   }
 
   if (useProxy && config.proxyServer) {
@@ -1579,6 +1562,10 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
   }
 
   private async getBrowser(useProxy: boolean) {
+    if (this.config.closeBrowserAfterCapture) {
+      return this.launch(useProxy)
+    }
+
     if (useProxy && this.config.proxyServer) {
       return this.proxyBrowserTask ||= this.memoizeBrowserTask(true)
     }
@@ -1660,7 +1647,7 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
       })
     } finally {
       if (this.config.closeBrowserAfterCapture) {
-        await this.closeBrowser(useProxy)
+        await browser.close().catch(() => null)
       }
     }
   }

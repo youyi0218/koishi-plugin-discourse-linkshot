@@ -1,37 +1,43 @@
-# koishi-plugin-discourse-linkshot
+﻿# koishi-plugin-discourse-linkshot
 
-Render Discourse topic links into chat-friendly snapshots for Koishi.
+用于 Koishi 的 Discourse 论坛链接截图插件。
 
-## Features
+当聊天中出现指定论坛的帖子链接时，插件会自动识别并发送截图。
 
-- Detect topic links under your configured Discourse host automatically
-- Render the first post by default, and append the requested reply when the URL contains a floor number
-- Retry with authenticated cookies when a restricted topic cannot be accessed publicly
-- Accept either a raw `_t` value or a full browser Cookie header
-- Expand `details` / `spoiler` content before screenshotting
-- Append visible text-to-link references for regular Markdown links
-- Support browser proxy and DoH
-- Optional browser reuse, or close the browser right after each render
+## 功能
 
-## Installation
+- 自动识别指定 Discourse 论坛链接
+- 默认截图首楼内容
+- 链接带楼层号时，可附加对应回复
+- 支持权限帖 Cookie 抓取
+- 支持展开 `details`、`spoiler` 等隐藏内容
+- 支持代理与 DoH
+- 支持浏览器复用或每次渲染后关闭浏览器
+
+## 安装
 
 ```bash
 npm i koishi-plugin-discourse-linkshot
 ```
 
-You also need a local Chromium/Chrome/Edge executable and should set its full path in the plugin config.
+## 依赖
 
-## Example Config
+需要本地可执行浏览器，并在配置中填写完整路径，例如：
+
+```text
+C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+## 示例配置
 
 ```yaml
 plugins:
   discourse-linkshot:
     enabled: true
     forumOrigin: https://forum.example.com
-    tCookie: _forum_session=...; _t=...; cf_clearance=...
+    tCookie: _forum_session=...; _t=...
     executablePath: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
     proxyServer: http://127.0.0.1:7890
-    proxyBypass: localhost,127.0.0.1
     dohEnabled: false
     dohTemplates: ''
     pageWaitUntil: domcontentloaded
@@ -39,27 +45,20 @@ plugins:
     closeBrowserAfterCapture: false
 ```
 
-## Main Options
+## 常用配置
 
-- `forumOrigin`: target Discourse origin
-- `allowedHosts`: extra hosts that can trigger snapshots
-- `allowSubdomains`: whether subdomains are allowed
-- `tCookie`: can be either a plain `_t` token or a full Cookie header copied from your browser
-- `executablePath`: browser executable path
-- `proxyServer`: browser proxy address
-- `proxyBypass`: proxy bypass rules
-- `dohEnabled`: enable secure DNS
-- `dohTemplates`: custom DoH templates
-- `pageWaitUntil`: page readiness mode, default `domcontentloaded`; if `load` keeps timing out, use this default
-- `browserTimeout`: browser launch/connect timeout, use `0` to disable timeout detection
-- `closeBrowserAfterCapture`: close browser immediately after each render, suitable for low-frequency rendering
-- `captureDelay`: extra wait time before screenshot
-- `navigationTimeout`: timeout for page loading and screenshotting
+- `forumOrigin`：要监听的论坛地址
+- `tCookie`：权限帖使用的 Cookie，可填 `_t` 或完整 Cookie
+- `executablePath`：浏览器路径
+- `proxyServer`：代理地址
+- `dohEnabled`：是否启用 DoH
+- `dohTemplates`：自定义 DoH 地址
+- `pageWaitUntil`：页面等待方式，推荐 `domcontentloaded`
+- `browserTimeout`：浏览器启动超时，`0` 表示不检测
+- `closeBrowserAfterCapture`：截图后立即关闭浏览器
 
-## Cookie Tip
+## 说明
 
-For restricted topics, copy the full `Cookie` request header from your browser devtools network panel and paste it into `tCookie`.
+如果要抓取权限帖，建议直接从浏览器开发者工具里复制完整 Cookie，粘贴到 `tCookie`。
 
-## Notes
-
-This package is mainly intended for personal/self-hosted Koishi bots.
+本插件更适合自用或私有部署场景。

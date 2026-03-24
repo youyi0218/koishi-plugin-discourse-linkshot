@@ -18,6 +18,7 @@ import {
   getPostLikeCount,
   matchesForumOrigin,
   normalizeTopicUrl,
+  PlaywrightDiscourseRenderer,
   resolveCategoryLabel,
   resolveConfig,
   rewriteUrlWithFrontProxy,
@@ -130,6 +131,16 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
     expect(createBrowserLaunchOptions(resolved).args).to.include('--dns-over-https-mode=automatic')
   })
 
+  it('adds docker-friendly software rendering launch args', () => {
+    const resolved = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    })
+
+    expect(createBrowserLaunchOptions(resolved).args).to.include('--disable-vulkan')
+    expect(createBrowserLaunchOptions(resolved).args).to.include('--use-gl=swiftshader')
+  })
+
   it('supports browser timeout and disable-timeout mode', () => {
     const normal = resolveConfig({
       forumOrigin: 'https://forum.example.com',
@@ -169,6 +180,29 @@ describe('@koishijs/plugin-discourse-linkshot helpers', () => {
     })
 
     expect(resolved.closeBrowserAfterCapture).to.equal(true)
+  })
+
+  it('launches isolated browsers when closeBrowserAfterCapture is enabled', async () => {
+    const resolved = resolveConfig({
+      forumOrigin: 'https://forum.example.com',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      closeBrowserAfterCapture: true,
+    })
+    const renderer = new PlaywrightDiscourseRenderer(resolved) as any
+    const firstBrowser = { close: jest.fn(async () => {}) }
+    const secondBrowser = { close: jest.fn(async () => {}) }
+    let launchCount = 0
+    const launch = jest.fn(async () => (++launchCount === 1 ? firstBrowser : secondBrowser))
+    renderer.launch = launch
+
+    const first = await renderer.getBrowser(false)
+    const second = await renderer.getBrowser(false)
+
+    expect(first).to.equal(firstBrowser)
+    expect(second).to.equal(secondBrowser)
+    expect(first).to.not.equal(second)
+    expect(renderer.directBrowserTask).to.equal(undefined)
+    expect(launch.mock.calls).to.have.length(2)
   })
 
   it('supports legacy cookieHeader as fallback source for _t', () => {
