@@ -18,6 +18,7 @@ const TEXT = {
   headless: '\u662f\u5426\u4ee5\u65e0\u5934\u6a21\u5f0f\u542f\u52a8\u6d4f\u89c8\u5668\u3002',
   closeBrowserAfterCapture: '\u662f\u5426\u5728\u6e32\u67d3\u5b8c\u6210\u540e\u7acb\u5373\u5173\u95ed\u6d4f\u89c8\u5668\u8fde\u63a5\u3002\u542f\u7528\u540e\u4f1a\u589e\u52a0\u6bcf\u6b21\u6e32\u67d3\u7684\u542f\u52a8\u65f6\u95f4\uff0c\u9002\u7528\u4e8e\u4f4e\u9891\u7387\u6e32\u67d3\u573a\u666f\u3002',
   sendFailureMessage: '\u622a\u56fe\u5931\u8d25\u65f6\uff0c\u662f\u5426\u5728\u804a\u5929\u4e2d\u53d1\u9001\u5931\u8d25\u63d0\u793a\u3002',
+  napcatMergedForward: '\u662f\u5426\u5728 NapCat / OneBot QQ \u573a\u666f\u4e0b\u989d\u5916\u53d1\u9001\u5e16\u5b50\u5185\u6587\u4ef6\u4e0e\u94fe\u63a5\u7684\u5408\u5e76\u8f6c\u53d1\u3002',
   publicErrorLabel: '\u516c\u5f00',
   authErrorLabel: '\u767b\u5f55',
   proxyRetryMessage: '\u4ee3\u7406\u8bbf\u95ee\u5931\u8d25\uff0c\u6b63\u5728\u76f4\u8fde\u91cd\u8bd5\uff1a',
@@ -64,6 +65,7 @@ export interface Config {
   headless?: boolean
   closeBrowserAfterCapture?: boolean
   sendFailureMessage?: boolean
+  napcatMergedForward?: boolean
   proxyServer?: string
   proxyBypass?: string
   dohEnabled?: boolean
@@ -89,6 +91,7 @@ export interface ResolvedConfig {
   headless: boolean
   closeBrowserAfterCapture: boolean
   sendFailureMessage: boolean
+  napcatMergedForward: boolean
   proxyServer: string
   proxyBypass: string
   dohEnabled: boolean
@@ -229,8 +232,21 @@ export interface CaptureOptions {
   useProxy?: boolean
 }
 
+export interface SnapshotForwardItem {
+  type: 'link' | 'file'
+  url: string
+  title: string
+  sourcePostNumber?: number
+  sourceAuthor?: string
+}
+
+export interface CaptureResult {
+  buffer: Buffer
+  forwardItems?: SnapshotForwardItem[]
+}
+
 export interface SnapshotRenderer {
-  capture(url: string, options?: CaptureOptions): Promise<Buffer>
+  capture(url: string, options?: CaptureOptions): Promise<Buffer | CaptureResult>
   dispose?(): Promise<void>
 }
 
@@ -256,6 +272,7 @@ export const Config: Schema<Config> = Schema.object({
   headless: Schema.boolean().description(TEXT.headless).default(true),
   closeBrowserAfterCapture: Schema.boolean().description(TEXT.closeBrowserAfterCapture).default(false),
   sendFailureMessage: Schema.boolean().description(TEXT.sendFailureMessage).default(false),
+  napcatMergedForward: Schema.boolean().description(TEXT.napcatMergedForward).default(false),
   proxyServer: Schema.string().description(TEXT.proxyServer).default(''),
   proxyBypass: Schema.string().description(TEXT.proxyBypass).default(''),
   dohEnabled: Schema.boolean().description(TEXT.dohEnabled).default(false),
@@ -331,6 +348,8 @@ const DISCOURSE_WAIT_IMAGES_SCRIPT = String.raw`
 const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
   const clean = (value) => (value || '').replace(/\s+/g, ' ').trim()
   const stripUrl = (value) => clean(value).replace(/^https?:\/\//i, '').replace(/\/+$/u, '')
+  const unique = (values) => [...new Set(values.map((value) => clean(value)).filter(Boolean))]
+  const textOf = (node) => clean(node?.textContent)
   const createBlockNote = (label, detail) => {
     const note = document.createElement('div')
     note.className = 'snapshot-hidden-block-note'
@@ -361,7 +380,7 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
       if (!(details instanceof HTMLElement)) continue
       details.open = true
       details.classList.add('snapshot-expanded-hidden')
-      insertBlockNoteBefore(details, '\u539f\u6298\u53e0\u5185\u5bb9', 'details \u5df2\u81ea\u52a8\u5c55\u5f00')
+      insertBlockNoteBefore(details, '原折叠内容', 'details 已自动展开')
       const summary = details.querySelector(':scope > summary')
       if (summary instanceof HTMLElement) summary.classList.add('snapshot-details-summary')
     }
@@ -378,9 +397,9 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
         || ['DIV', 'P', 'ASIDE', 'SECTION', 'ARTICLE', 'BLOCKQUOTE', 'PRE', 'UL', 'OL', 'LI', 'TABLE', 'FIGURE'].includes(node.tagName)
       if (blockLike) {
         node.classList.add('snapshot-spoiler-block')
-        insertBlockNoteBefore(node, '\u539f\u5267\u900f\u5185\u5bb9', '\u5df2\u81ea\u52a8\u5c55\u5f00')
+        insertBlockNoteBefore(node, '原剧透内容', '已自动展开')
       } else if (!node.querySelector(':scope > .snapshot-hidden-inline-note')) {
-        node.prepend(createInlineNote('\u539f\u5267\u900f'))
+        node.prepend(createInlineNote('原剧透'))
       }
 
       const stack = [node, ...Array.from(node.querySelectorAll('*'))]
@@ -421,6 +440,73 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
     const href = clean(anchor.href || anchor.getAttribute('href'))
     return /\.(?:png|jpe?g|gif|webp|bmp|svg|avif)(?:$|[?#])/i.test(href)
   }
+  const collectQuoteLines = (root, fallbackHref) => {
+    if (!(root instanceof HTMLElement)) return fallbackHref ? [fallbackHref] : []
+    const nodes = Array.from(root.querySelectorAll('p, li, pre, code, blockquote, .quote, .onebox-metadata, .onebox-summary, .contents'))
+    const lines = unique(nodes.map((node) => textOf(node)))
+      .filter((line) => line.length <= 220)
+      .slice(0, 4)
+    if (lines.length) return lines
+    const fallback = textOf(root)
+    return fallback ? [fallback.slice(0, 220)] : (fallbackHref ? [fallbackHref] : [])
+  }
+  const simplifyQuotes = (root) => {
+    const quoteSelectors = ['aside.quote', 'aside.quote-modified', 'aside.onebox', 'aside.onebox-body', '.onebox.allowlistedgeneric', '.quote-modified']
+    const nodes = Array.from(root.querySelectorAll(quoteSelectors.join(',')))
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue
+      if (node.dataset.snapshotSimpleQuote === 'true') continue
+      node.dataset.snapshotSimpleQuote = 'true'
+
+      const titleAnchors = Array.from(node.querySelectorAll(':scope > .title a[href], :scope header a[href], :scope a[href]'))
+        .filter((anchor) => anchor instanceof HTMLAnchorElement)
+      const titleAnchor = titleAnchors.find((anchor) => clean(anchor.textContent) && !clean(anchor.textContent).endsWith(':')) || titleAnchors[titleAnchors.length - 1]
+      const href = clean(node.getAttribute('data-onebox-src')) || clean(titleAnchor?.href || titleAnchor?.getAttribute('href'))
+      const title = clean(
+        titleAnchor?.textContent
+        || node.querySelector('.onebox-title, .title .quote-topic, .title, header, .source')?.textContent
+      ) || stripUrl(href)
+
+      const metaParts = unique([
+        textOf(node.querySelector(':scope > .title a[href], .source a[href], .onebox-metadata .label1, .onebox-metadata .domain')),
+        href ? stripUrl(href).split('/')[0] : '',
+      ]).filter((value) => value && value !== title)
+
+      const bodyRoot = node.querySelector(':scope > blockquote, .onebox-body, .onebox-metadata, .contents, .quote, article, .source') || node
+      const lines = collectQuoteLines(bodyRoot, href)
+        .filter((line) => line && line !== title && !metaParts.includes(line))
+        .slice(0, 4)
+
+      const replacement = document.createElement('blockquote')
+      replacement.className = 'snapshot-simple-quote'
+      if (href) {
+        const link = document.createElement('a')
+        link.className = 'snapshot-quote-title'
+        link.href = href
+        link.textContent = title || href
+        replacement.appendChild(link)
+      } else if (title) {
+        const heading = document.createElement('strong')
+        heading.className = 'snapshot-quote-title'
+        heading.textContent = title
+        replacement.appendChild(heading)
+      }
+      if (metaParts.length) {
+        const meta = document.createElement('span')
+        meta.className = 'snapshot-quote-meta'
+        meta.textContent = metaParts.join(' / ')
+        replacement.appendChild(meta)
+      }
+      for (const line of lines) {
+        const paragraph = document.createElement('p')
+        paragraph.className = 'snapshot-quote-line'
+        paragraph.textContent = line
+        replacement.appendChild(paragraph)
+      }
+      if (!replacement.children.length) continue
+      node.replaceWith(replacement)
+    }
+  }
   const collectHiddenLinks = (root) => {
     const seen = new Set()
     const results = []
@@ -446,7 +532,7 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
     section.className = 'snapshot-link-reference-section'
     const title = document.createElement('div')
     title.className = 'snapshot-link-reference-title'
-    title.textContent = '\u94fe\u63a5\u5c55\u5f00\uff08\u6587\u5b57 \u2192 \u5b9e\u9645\u94fe\u63a5\uff09'
+    title.textContent = '\u94fe\u63a5\u5c55\u5f00\uff08\u6587\u5b57 -> \u5b9e\u9645\u94fe\u63a5\uff09'
     const list = document.createElement('div')
     list.className = 'snapshot-link-reference-list'
     for (const item of links) {
@@ -457,7 +543,7 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
       text.textContent = item.text
       const arrow = document.createElement('span')
       arrow.className = 'snapshot-link-reference-arrow'
-      arrow.textContent = '\u2192'
+      arrow.textContent = '->'
       const link = document.createElement('a')
       link.className = 'snapshot-link-reference-url'
       link.href = item.href
@@ -470,12 +556,94 @@ const SNAPSHOT_POST_PROCESS_SCRIPT = String.raw`
   }
   for (const body of Array.from(document.querySelectorAll('[data-snapshot-post-body]'))) {
     if (!(body instanceof HTMLElement)) continue
+    simplifyQuotes(body)
     const links = collectHiddenLinks(body)
     markDetails(body)
     markSpoilers(body)
     prepareMedia(body)
     appendHiddenLinks(body, links)
   }
+`
+
+const SNAPSHOT_FORWARD_ITEM_SCRIPT = String.raw`
+  const clean = (value) => (value || '').replace(/\s+/g, ' ').trim()
+  const normalizeHref = (value) => {
+    const source = clean(value)
+    if (!source) return ''
+    try {
+      const url = new URL(source, document.baseURI)
+      url.hash = ''
+      return url.toString()
+    } catch {
+      return source
+    }
+  }
+  const inferTitle = (anchor, href) => {
+    const text = clean(anchor?.querySelector('.attachment-name, .title, .snapshot-quote-title')?.textContent) || clean(anchor?.textContent)
+    if (text) return text
+    try {
+      return decodeURIComponent(new URL(href).pathname.split('/').filter(Boolean).pop() || href)
+    } catch {
+      return href
+    }
+  }
+  const isMediaAnchor = (anchor) => {
+    if (!(anchor instanceof HTMLAnchorElement)) return false
+    if (anchor.classList.contains('lightbox') || anchor.classList.contains('image-lightbox')) return true
+    if (anchor.querySelector('img, picture, source, video, audio, svg, figure, .lightbox-wrapper, .lightbox__content, .image-wrapper')) return true
+    const href = normalizeHref(anchor.href || anchor.getAttribute('href'))
+    return /\.(?:png|jpe?g|gif|webp|bmp|svg|avif)(?:$|[?#])/i.test(href)
+  }
+  const isFileAnchor = (anchor) => {
+    if (!(anchor instanceof HTMLAnchorElement)) return false
+    if (isMediaAnchor(anchor)) return false
+    if (anchor.hasAttribute('download')) return true
+    if (anchor.classList.contains('attachment')) return true
+    if (anchor.closest('.attachment, .attachment-wrapper, .attachment-list')) return true
+    const href = normalizeHref(anchor.href || anchor.getAttribute('href'))
+    return /\.(?:zip|rar|7z|tar|gz|bz2|xz|pdf|epub|txt|md|csv|json|ya?ml|toml|log|apk|ipa|exe|msi|dmg|pkg|deb|rpm|jar|iso|img|docx?|xlsx?|pptx?|psd|ai|sketch|torrent)(?:$|[?#])/i.test(href)
+  }
+  const forumRoot = (() => {
+    try {
+      const url = new URL(document.baseURI)
+      url.pathname = '/'
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    } catch {
+      return ''
+    }
+  })()
+  const seen = new Set()
+  const items = []
+  const push = (item) => {
+    if (!item?.url || !item?.type) return
+    const key = item.type + '|' + item.url
+    if (seen.has(key)) return
+    seen.add(key)
+    items.push(item)
+  }
+  for (const body of Array.from(document.querySelectorAll('[data-snapshot-post-body]'))) {
+    if (!(body instanceof HTMLElement)) continue
+    const sourcePostNumber = Number(body.getAttribute('data-source-post-number') || '') || undefined
+    const sourceAuthor = clean(body.getAttribute('data-source-author')) || undefined
+    for (const anchor of Array.from(body.querySelectorAll('a[href]'))) {
+      if (!(anchor instanceof HTMLAnchorElement)) continue
+      if (anchor.closest('.snapshot-link-reference-section')) continue
+      const url = normalizeHref(anchor.href || anchor.getAttribute('href'))
+      if (!url || isMediaAnchor(anchor)) continue
+      const title = inferTitle(anchor, url)
+      const normalizedTitle = clean(title).toLowerCase()
+      const normalizedUrl = url.toLowerCase()
+      if (url === forumRoot && (!normalizedTitle || normalizedTitle === normalizedUrl || normalizedTitle === stripUrl(url).toLowerCase())) continue
+      if (isFileAnchor(anchor)) {
+        push({ type: 'file', url, title, sourcePostNumber, sourceAuthor })
+      } else {
+        push({ type: 'link', url, title, sourcePostNumber, sourceAuthor })
+      }
+    }
+  }
+  return items
 `
 
 const DISCOURSE_DOM_EXTRACT_SCRIPT = String.raw`
@@ -1005,6 +1173,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     headless: config.headless ?? true,
     closeBrowserAfterCapture: config.closeBrowserAfterCapture ?? false,
     sendFailureMessage: config.sendFailureMessage ?? false,
+    napcatMergedForward: config.napcatMergedForward ?? false,
     proxyServer: config.proxyServer?.trim() || '',
     proxyBypass: config.proxyBypass?.trim() || '',
     dohEnabled: config.dohEnabled ?? false,
@@ -1015,6 +1184,157 @@ export function resolveConfig(config: Config): ResolvedConfig {
 export async function sendSnapshot(session: Session, buffer: Buffer) {
   const src = `data:image/png;base64,${buffer.toString('base64')}`
   await session.send(h('img', { src }))
+}
+
+function normalizeForwardItemUrl(value?: string) {
+  const source = value?.trim()
+  if (!source) return ''
+
+  try {
+    const url = new URL(source)
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return source
+  }
+}
+
+function inferForwardItemTitle(url: string, fallback?: string) {
+  const preferred = fallback?.trim()
+  if (preferred) return preferred
+
+  try {
+    const pathname = new URL(url).pathname.split('/').filter(Boolean).pop() || url
+    return decodeURIComponent(pathname)
+  } catch {
+    return url
+  }
+}
+
+function dedupeForwardItems(items?: SnapshotForwardItem[]) {
+  const map = new Map<string, SnapshotForwardItem>()
+
+  for (const item of items || []) {
+    const url = normalizeForwardItemUrl(item?.url)
+    if (!url || !item?.type) continue
+    const title = inferForwardItemTitle(url, item.title)
+    const key = `${item.type}|${url}`
+    if (map.has(key)) continue
+    map.set(key, {
+      type: item.type,
+      url,
+      title,
+      sourcePostNumber: item.sourcePostNumber,
+      sourceAuthor: item.sourceAuthor?.trim() || undefined,
+    })
+  }
+
+  return [...map.values()]
+}
+
+function normalizeCaptureResult(result: Buffer | CaptureResult) {
+  if (Buffer.isBuffer(result)) return { buffer: result, forwardItems: [] as SnapshotForwardItem[] }
+  if (result && typeof result === 'object' && Buffer.isBuffer(result.buffer)) {
+    return { buffer: result.buffer, forwardItems: dedupeForwardItems(result.forwardItems) }
+  }
+
+  throw new Error('\u622a\u56fe\u6e32\u67d3\u5668\u672a\u8fd4\u56de\u6709\u6548\u7684\u56fe\u7247\u6570\u636e\u3002')
+}
+
+function toNapCatActionName(action: string) {
+  return action.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+function isDirectSession(session: Session) {
+  const directSession = session as Session & { isDirect?: boolean; subtype?: string; channel?: { type?: number | string } }
+  return directSession.isDirect === true
+    || directSession.subtype === 'private'
+    || directSession.channel?.type === 1
+    || (!session.guildId && !!session.userId && session.channelId === session.userId)
+}
+
+function resolveNapCatForwardTarget(session: Session) {
+  if (isDirectSession(session) && session.userId) return { direct: true as const, user_id: String(session.userId) }
+
+  const groupId = session.guildId || session.channelId
+  if (groupId) return { direct: false as const, group_id: String(groupId) }
+  if (session.userId) return { direct: true as const, user_id: String(session.userId) }
+  return null
+}
+
+async function callNapCatAction(session: Session, action: string, params: Record<string, any>) {
+  const bot = session.bot as Record<string, any> | undefined
+  const internal = bot?.internal as Record<string, any> | undefined
+  const actionNames = [action, toNapCatActionName(action)]
+
+  for (const target of [internal, bot]) {
+    for (const name of actionNames) {
+      if (typeof target?.[name] === 'function') return await target[name](params)
+    }
+  }
+
+  for (const target of [internal, bot]) {
+    if (typeof target?.request === 'function') return await target.request(action, params)
+    if (typeof target?._request === 'function') return await target._request(action, params)
+    if (typeof target?.call === 'function') return await target.call(action, params)
+    if (typeof target?.get === 'function') return await target.get(action, params)
+  }
+
+  throw new Error('\u5f53\u524d\u9002\u914d\u5668\u672a\u66b4\u9732 NapCat \u5408\u5e76\u8f6c\u53d1\u63a5\u53e3\u3002')
+}
+
+function formatNapCatNodeNickname(item: SnapshotForwardItem) {
+  const parts = [item.type === 'file' ? '\u5e16\u5b50\u6587\u4ef6' : '\u5e16\u5b50\u94fe\u63a5']
+  if (item.sourcePostNumber) parts.push(`#${item.sourcePostNumber}`)
+  if (item.sourceAuthor?.trim()) parts.push(item.sourceAuthor.trim())
+  return parts.join(' / ')
+}
+
+function buildNapCatNodeContent(item: SnapshotForwardItem) {
+  if (item.type === 'file') {
+    return [{
+      type: 'file',
+      data: {
+        file: item.url,
+        url: item.url,
+        name: inferForwardItemTitle(item.url, item.title),
+      },
+    }]
+  }
+
+  const title = inferForwardItemTitle(item.url, item.title)
+  const text = title && title !== item.url ? `${title}
+${item.url}` : item.url
+  return [{ type: 'text', data: { text } }]
+}
+
+async function sendNapCatMergedForward(session: Session, items: SnapshotForwardItem[]) {
+  const forwardItems = dedupeForwardItems(items)
+  if (!forwardItems.length) return false
+
+  const target = resolveNapCatForwardTarget(session)
+  if (!target) return false
+
+  const senderId = String((session.bot as any)?.selfId || (session as any)?.selfId || session.userId || 0)
+  const messages = forwardItems.map((item) => ({
+    type: 'node',
+    data: {
+      user_id: senderId,
+      nickname: formatNapCatNodeNickname(item),
+      content: buildNapCatNodeContent(item),
+    },
+  }))
+
+  const action = target.direct ? 'send_private_forward_msg' : 'send_group_forward_msg'
+  const payload = { ...target, messages }
+
+  try {
+    await callNapCatAction(session, action, payload)
+  } catch {
+    await callNapCatAction(session, 'send_forward_msg', payload)
+  }
+
+  return true
 }
 
 function sortPostsByNumber(posts: TopicPost[]) {
@@ -1119,15 +1439,15 @@ function renderTopicBadges(payload: TopicPayload, sitePayload?: SitePayload) {
     const categoryInfo = getSiteCategories(sitePayload).find((item) => item.id === payload.category_id)
     const background = normalizeColor(categoryInfo?.color, '#f97316')
     const foreground = normalizeColor(categoryInfo?.text_color, '#ffffff')
-    items.push(`<span class="badge badge-category" style="--badge-bg:${background};--badge-fg:${foreground}">${escapeHtml(category)}</span>`)
+    items.push(`<span class="meta-badge meta-badge-category" style="--badge-bg:${background};--badge-fg:${foreground}">${escapeHtml(category)}</span>`)
   }
 
-  items.push(...tags.map((tag) => `<span class="badge badge-tag">#${escapeHtml(tag)}</span>`))
-  return `<div class="badge-row">${items.join('')}</div>`
+  items.push(...tags.map((tag) => `<span class="meta-badge meta-badge-tag">#${escapeHtml(tag)}</span>`))
+  return `<div class="meta-badges">${items.join('')}</div>`
 }
 
 function renderStatCard(label: string, value: string) {
-  return `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${escapeHtml(value)}</div></div>`
+  return `<div class="meta-stat"><span class="meta-stat-label">${escapeHtml(label)}</span><strong class="meta-stat-value">${escapeHtml(value)}</strong></div>`
 }
 
 function renderCommentStat(label: string, value: string) {
@@ -1144,7 +1464,7 @@ function renderTopicAuthorHeader(post: TopicPost, baseOrigin: string) {
   const createdAt = formatDateTime(post.created_at)
 
   return `
-    <section class="topic-author-card">
+    <header class="topic-author-card">
       <div class="topic-author">
         ${avatar ? `<img class="topic-author-avatar" src="${escapeHtml(avatar)}" alt="${displayName}" />` : '<div class="topic-author-avatar topic-author-avatar-fallback">#</div>'}
         <div class="topic-author-copy">
@@ -1158,7 +1478,7 @@ function renderTopicAuthorHeader(post: TopicPost, baseOrigin: string) {
           </div>
         </div>
       </div>
-    </section>`
+    </header>`
 }
 
 function renderCommentCard(post: TopicPost, baseOrigin: string) {
@@ -1173,8 +1493,8 @@ function renderCommentCard(post: TopicPost, baseOrigin: string) {
   const createdAt = formatDateTime(post.created_at)
   const likeCount = formatNumber(getPostLikeCount(post))
   const replyCount = formatNumber(post.reply_count ?? 0)
-  const replyTo = post.reply_to_post_number ? `<span class="comment-pill">回复 #${post.reply_to_post_number}</span>` : ''
-  const cooked = post.cooked || '<p>该楼层暂无可展示内容。</p>'
+  const replyTo = post.reply_to_post_number ? `<span class="comment-pill">\u56de\u590d #${post.reply_to_post_number}</span>` : ''
+  const cooked = post.cooked || '<p>\u8be5\u697c\u5c42\u6682\u65f6\u65e0\u53ef\u5c55\u793a\u5185\u5bb9\u3002</p>'
 
   return `
       <article class="comment-card">
@@ -1188,17 +1508,17 @@ function renderCommentCard(post: TopicPost, baseOrigin: string) {
               </div>
               <div class="comment-meta-row">
                 <span class="comment-pill comment-floor-pill">#${post.post_number}</span>
-                <span class="comment-pill">发表于 ${escapeHtml(createdAt)}</span>
+                <span class="comment-pill">\u53d1\u8868\u4e8e ${escapeHtml(createdAt)}</span>
                 ${replyTo}
               </div>
             </div>
           </div>
           <div class="comment-stats">
-            ${renderCommentStat('回复', replyCount)}
-            ${renderCommentStat('点赞', likeCount)}
+            ${renderCommentStat('\u56de\u590d', replyCount)}
+            ${renderCommentStat('\u70b9\u8d5e', likeCount)}
           </div>
         </header>
-        <div class="post comment-body" data-snapshot-post-body="comment">${cooked}</div>
+        <div class="post comment-body" data-snapshot-post-body="comment" data-source-post-number="${post.post_number}" data-source-author="${escapeHtml(displayNameText)}">${cooked}</div>
       </article>`
 }
 
@@ -1209,8 +1529,8 @@ function renderCommentSections(posts: TopicPost[], baseOrigin: string) {
   return `
     <section class="comment-section">
       <div class="section-heading">
-        <span class="section-kicker">相关评论</span>
-        <h2>共 ${commentPosts.length} 条</h2>
+        <span class="section-kicker">\u76f8\u5173\u8bc4\u8bba</span>
+        <strong>${commentPosts.length} \u6761</strong>
       </div>
       <div class="comment-list">
         ${commentPosts.map((post) => renderCommentCard(post, baseOrigin)).join('')}
@@ -1228,6 +1548,7 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, commentPosts:
   const badges = renderTopicBadges(payload, sitePayload)
   const topicAuthorHeader = renderTopicAuthorHeader(opPost, baseOrigin)
   const commentSection = renderCommentSections(commentPosts, baseOrigin)
+  const authorName = escapeHtml(getDisplayName(opPost))
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1239,178 +1560,183 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, commentPosts:
   <style>
     :root {
       color-scheme: light;
-      --paper: #f4efe7;
-      --paper-strong: #efe5d6;
-      --ink: #1c1917;
-      --ink-soft: #57534e;
-      --line: rgba(120, 53, 15, 0.14);
-      --card: rgba(255, 255, 255, 0.88);
-      --card-strong: rgba(255, 251, 245, 0.96);
-      --accent: #b45309;
-      --accent-soft: #f59e0b;
-      --shadow: 0 24px 80px rgba(120, 53, 15, 0.14);
-      --radius-xl: 28px;
-      --radius-lg: 20px;
+      --page: #f5f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #d8dee9;
+      --line-strong: #c4ccd8;
+      --text: #111827;
+      --text-soft: #4b5563;
+      --accent: #2563eb;
+      --quote: #eff6ff;
+      --quote-line: #93c5fd;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
       --sans: 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-      --serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at top left, rgba(245, 158, 11, 0.20), transparent 30%),
-        radial-gradient(circle at top right, rgba(180, 83, 9, 0.18), transparent 34%),
-        linear-gradient(180deg, #fbf8f3 0%, var(--paper) 46%, #efe7dc 100%);
-      color: var(--ink);
+      background: var(--page);
+      color: var(--text);
       font-family: var(--sans);
     }
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background-image:
-        linear-gradient(rgba(120, 53, 15, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(120, 53, 15, 0.04) 1px, transparent 1px);
-      background-size: 28px 28px;
-      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent 88%);
-    }
     .wrap {
-      position: relative;
-      width: min(980px, calc(100vw - 40px));
+      width: min(960px, calc(100vw - 32px));
       margin: 0 auto;
-      padding: 28px 0 36px;
+      padding: 16px 0 24px;
     }
     .panel {
-      position: relative;
-      overflow: hidden;
+      background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: var(--radius-xl);
-      background: linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(255, 248, 240, 0.92));
+      border-radius: 22px;
       box-shadow: var(--shadow);
-      padding: 30px 30px 26px;
-    }
-    .section-kicker {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--accent);
-      font-weight: 700;
-    }
-    .section-kicker::before {
-      content: '';
-      width: 32px;
-      height: 1px;
-      background: currentColor;
-      opacity: 0.5;
+      padding: 22px;
     }
     .title {
-      margin: 14px 0 0;
-      font-family: var(--serif);
-      font-size: 38px;
-      line-height: 1.22;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      color: #1f1a17;
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.3;
+      font-weight: 800;
       word-break: break-word;
     }
-    .badge-row {
+    .meta-badges {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 18px;
+      gap: 8px;
+      margin-top: 14px;
     }
-    .badge {
+    .meta-badge {
       display: inline-flex;
       align-items: center;
-      min-height: 34px;
-      padding: 7px 13px;
+      min-height: 30px;
+      padding: 0 12px;
       border-radius: 999px;
-      border: 1px solid rgba(120, 53, 15, 0.10);
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
-      line-height: 1;
+      border: 1px solid rgba(148, 163, 184, 0.28);
     }
-    .badge-category {
+    .meta-badge-category {
       background: var(--badge-bg, #f97316);
       color: var(--badge-fg, #ffffff);
+      border-color: transparent;
     }
-    .badge-tag {
-      background: rgba(255, 255, 255, 0.8);
-      color: var(--accent);
+    .meta-badge-tag {
+      background: #f8fafc;
+      color: #1d4ed8;
     }
-    .hero-divider {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      gap: 16px;
-      margin: 24px 0 22px;
-      color: rgba(180, 83, 9, 0.6);
-      font-size: 13px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      font-weight: 700;
-    }
-    .hero-divider::before,
-    .hero-divider::after {
-      content: '';
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(180, 83, 9, 0.24), transparent);
+    .topic-author-card, .post-shell, .comment-card {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
     }
     .topic-author-card {
-      margin-top: 22px;
-      border-radius: 22px;
-      border: 1px solid rgba(120, 53, 15, 0.13);
-      background: rgba(255, 252, 247, 0.94);
-      padding: 18px;
-      position: relative;
-      overflow: hidden;
+      margin-top: 16px;
+      padding: 16px;
     }
-    .topic-author { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
-    .topic-author-avatar { width: 62px; height: 62px; flex: 0 0 62px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(180, 83, 9, 0.16); background: #fff; }
-    .topic-author-avatar-fallback { display: grid; place-items: center; font-size: 20px; font-weight: 800; color: var(--accent); background: rgba(245, 158, 11, 0.16); }
-    .topic-author-copy { min-width: 0; }
-    .topic-author-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #1f1a17; font-size: 19px; line-height: 1.4; }
-    .topic-author-username { color: var(--ink-soft); font-size: 14px; font-weight: 600; }
-    .topic-author-meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .topic-author, .comment-author {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      min-width: 0;
+    }
+    .topic-author-avatar, .comment-avatar {
+      width: 52px;
+      height: 52px;
+      flex: 0 0 52px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #ffffff;
+      border: 1px solid var(--line-strong);
+    }
+    .topic-author-avatar-fallback, .comment-avatar-fallback {
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      color: var(--accent);
+      background: #dbeafe;
+    }
+    .topic-author-copy, .comment-author-copy { min-width: 0; }
+    .topic-author-name-row, .comment-name-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 18px;
+      line-height: 1.4;
+    }
+    .topic-author-username, .comment-username {
+      color: var(--text-soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .topic-author-meta-row, .comment-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .comment-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #e0ecff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: var(--text-soft);
+    }
+    .section-kicker {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+    }
     .post-shell {
-      border-radius: 22px;
-      border: 1px solid rgba(120, 53, 15, 0.13);
-      background: rgba(255, 252, 247, 0.94);
+      margin-top: 16px;
       padding: 18px;
     }
     .post {
-      font-size: 18px;
-      line-height: 1.9;
-      color: var(--ink);
+      font-size: 17px;
+      line-height: 1.85;
+      color: var(--text);
       word-break: break-word;
     }
     .post > :first-child { margin-top: 0; }
     .post > :last-child { margin-bottom: 0; }
-    .post p, .post ul, .post ol, .post blockquote, .post pre, .post table, .post aside, .post details { margin: 0 0 1.08em; }
-    .post a { color: #9a3412; text-decoration: none; border-bottom: 1px solid rgba(154, 52, 18, 0.22); }
+    .post p, .post ul, .post ol, .post blockquote, .post pre, .post table, .post aside, .post details { margin: 0 0 1em; }
+    .post a {
+      color: #1d4ed8;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(37, 99, 235, 0.24);
+    }
     .post a.lightbox, .post figure > a, .post .lightbox-wrapper > a, .post .image-wrapper > a { border-bottom: none; }
     .post .lightbox-wrapper .meta, .post figure figcaption, .post .image-wrapper .image-caption { display: none !important; }
     .post .image-wrapper, .post .lightbox-wrapper, .post figure {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 10px;
+      gap: 8px;
       width: 100%;
       max-width: 100%;
-      margin: 16px 0 18px;
+      margin: 14px 0 16px;
     }
     .post img:not(.emoji):not(.d-emoji):not([alt^=':']):not([title^=':']), .post video, .post iframe {
       max-width: 100% !important;
       height: auto !important;
       display: block;
-      margin: 16px auto;
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.85);
+      margin: 12px auto;
+      border-radius: 14px;
+      background: #ffffff;
     }
     .post figure img:not(.emoji):not(.d-emoji):not([alt^=':']):not([title^=':']), .post .lightbox-wrapper img:not(.emoji):not(.d-emoji):not([alt^=':']):not([title^=':']), .post .image-wrapper img:not(.emoji):not(.d-emoji):not([alt^=':']):not([title^=':']) { margin: 0; }
     .post img.emoji, .post img.d-emoji, .post img[alt^=':'], .post img[title^=':'] {
@@ -1431,60 +1757,120 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, commentPosts:
       word-break: break-word;
     }
     .post pre, .post code { font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
-    .post code { padding: 0.14em 0.4em; border-radius: 8px; background: rgba(120, 53, 15, 0.08); font-size: 0.92em; }
-    .post pre { padding: 16px 18px; border-radius: 16px; background: #1f1a17; color: #fef3c7; overflow: hidden; }
+    .post code { padding: 0.12em 0.38em; border-radius: 8px; background: #e5eefc; font-size: 0.92em; }
+    .post pre { padding: 14px 16px; border-radius: 14px; background: #0f172a; color: #f8fafc; overflow: hidden; }
     .post pre code { padding: 0; background: transparent; color: inherit; }
-    .post blockquote { margin-left: 0; padding: 14px 18px; border-left: 4px solid rgba(180, 83, 9, 0.42); border-radius: 0 16px 16px 0; background: rgba(245, 158, 11, 0.08); color: var(--ink-soft); }
-    .post table { width: 100%; display: block; overflow-x: auto; border-collapse: collapse; border: 1px solid rgba(120, 53, 15, 0.12); border-radius: 14px; background: rgba(255, 255, 255, 0.9); }
-    .post th, .post td { padding: 10px 12px; border-bottom: 1px solid rgba(120, 53, 15, 0.08); border-right: 1px solid rgba(120, 53, 15, 0.08); text-align: left; }
-    .post details.snapshot-expanded-hidden { padding: 16px 18px; border-radius: 18px; border: 1px solid rgba(120, 53, 15, 0.14); background: rgba(255, 255, 255, 0.88); }
-    .post details.snapshot-expanded-hidden > summary { cursor: default; color: #7c2d12; font-weight: 800; margin-bottom: 12px; }
+    .post blockquote {
+      margin-left: 0;
+      padding: 12px 14px;
+      border-left: 3px solid var(--quote-line);
+      border-radius: 0 12px 12px 0;
+      background: var(--quote);
+      color: var(--text-soft);
+    }
+    .post blockquote.snapshot-simple-quote {
+      padding: 12px 14px;
+      border-left-width: 4px;
+    }
+    .snapshot-quote-title, .snapshot-quote-meta, .snapshot-quote-line {
+      display: block;
+      margin: 0;
+      word-break: break-word;
+    }
+    .snapshot-quote-title {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .snapshot-quote-meta {
+      color: #64748b;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .snapshot-quote-line::before {
+      content: '> ';
+      color: #64748b;
+      font-weight: 700;
+    }
+    .snapshot-quote-line + .snapshot-quote-line { margin-top: 2px; }
+    .post table { width: 100%; display: block; overflow-x: auto; border-collapse: collapse; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; }
+    .post th, .post td { padding: 10px 12px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; }
+    .post details.snapshot-expanded-hidden { padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: #ffffff; }
+    .post details.snapshot-expanded-hidden > summary { cursor: default; color: var(--accent); font-weight: 700; margin-bottom: 10px; }
     .snapshot-hidden-block-note { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; }
-    .snapshot-hidden-chip, .snapshot-hidden-inline-note { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: rgba(180, 83, 9, 0.12); color: #9a3412; font-size: 12px; font-weight: 800; letter-spacing: 0.08em; white-space: nowrap; }
-    .snapshot-hidden-note-text { color: var(--ink-soft); font-size: 13px; font-weight: 700; }
-    .snapshot-hidden-inline-note { margin-right: 0.55em; vertical-align: middle; }
-    .snapshot-spoiler-open { filter: none !important; -webkit-filter: none !important; backdrop-filter: none !important; color: inherit !important; text-shadow: none !important; background: rgba(245, 158, 11, 0.10) !important; border: 1px dashed rgba(180, 83, 9, 0.24); border-radius: 12px; padding: 0.05em 0.45em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .snapshot-hidden-chip, .snapshot-hidden-inline-note { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: #e0ecff; color: #1d4ed8; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .snapshot-hidden-note-text { color: var(--text-soft); font-size: 13px; font-weight: 600; }
+    .snapshot-hidden-inline-note { margin-right: 0.45em; vertical-align: middle; }
+    .snapshot-spoiler-open { filter: none !important; -webkit-filter: none !important; backdrop-filter: none !important; color: inherit !important; text-shadow: none !important; background: #eef6ff !important; border: 1px dashed #93c5fd; border-radius: 10px; padding: 0.05em 0.4em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .snapshot-spoiler-open img { filter: none !important; -webkit-filter: none !important; }
-    .snapshot-spoiler-open.snapshot-spoiler-block { display: block; padding: 14px 16px; margin-bottom: 1.08em; }
-    .snapshot-link-reference-section { margin-top: 18px; padding-top: 14px; border-top: 1px dashed rgba(120, 53, 15, 0.18); }
-    .snapshot-link-reference-title { color: #9a3412; font-size: 13px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
-    .snapshot-link-reference-list { display: grid; gap: 10px; }
-    .snapshot-link-reference-item { display: grid; grid-template-columns: minmax(0, 220px) auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(120, 53, 15, 0.08); }
-    .snapshot-link-reference-text { color: #1f1a17; font-weight: 700; word-break: break-word; }
-    .snapshot-link-reference-arrow { color: var(--ink-soft); font-weight: 700; }
-    .snapshot-link-reference-url { color: #9a3412; word-break: break-all; }
+    .snapshot-spoiler-open.snapshot-spoiler-block { display: block; padding: 12px 14px; margin-bottom: 1em; }
+    .snapshot-link-reference-section { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
+    .snapshot-link-reference-title { color: var(--text-soft); font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+    .snapshot-link-reference-list { display: grid; gap: 8px; }
+    .snapshot-link-reference-item { display: grid; grid-template-columns: minmax(0, 180px) auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 10px 12px; border-radius: 12px; background: #ffffff; border: 1px solid var(--line); }
+    .snapshot-link-reference-text { color: var(--text); font-weight: 700; word-break: break-word; }
+    .snapshot-link-reference-arrow { color: var(--text-soft); font-weight: 700; }
+    .snapshot-link-reference-url { color: var(--accent); word-break: break-all; }
     .summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-      margin-top: 22px;
+      gap: 10px;
+      margin-top: 16px;
     }
-    .stat { border-radius: 18px; border: 1px solid rgba(120, 53, 15, 0.11); background: rgba(255, 251, 245, 0.96); padding: 16px 18px; }
-    .stat-label { color: var(--ink-soft); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
-    .stat-value { color: #1f1a17; font-size: 24px; font-weight: 800; line-height: 1.3; word-break: break-word; }
-    .comment-section { margin-top: 28px; }
-    .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-    .section-heading h2 { margin: 8px 0 0; font-family: var(--serif); font-size: 24px; color: #1f1a17; }
-    .comment-list { display: grid; gap: 16px; }
-    .comment-card { border-radius: 22px; border: 1px solid rgba(120, 53, 15, 0.13); background: rgba(255, 252, 247, 0.94); padding: 18px; }
-    .comment-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
-    .comment-author { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
-    .comment-avatar { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(180, 83, 9, 0.16); background: #fff; }
-    .comment-avatar-fallback { display: grid; place-items: center; font-size: 18px; font-weight: 800; color: var(--accent); background: rgba(245, 158, 11, 0.16); }
-    .comment-author-copy { min-width: 0; }
-    .comment-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #1f1a17; font-size: 18px; line-height: 1.4; }
-    .comment-username { color: var(--ink-soft); font-size: 14px; font-weight: 600; }
-    .comment-meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-    .comment-pill { display: inline-flex; align-items: center; min-height: 30px; padding: 0 11px; border-radius: 999px; background: rgba(245, 158, 11, 0.10); color: #9a3412; font-size: 13px; font-weight: 700; }
-    .comment-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-    .comment-stat { display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); border: 1px solid rgba(120, 53, 15, 0.10); color: var(--ink-soft); font-size: 14px; }
-    .comment-stat strong { color: #1f1a17; font-size: 15px; }
-    .comment-body { font-size: 16px; line-height: 1.84; }
+    .meta-stat {
+      display: grid;
+      gap: 6px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+    }
+    .meta-stat-label {
+      color: var(--text-soft);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .meta-stat-value {
+      color: var(--text);
+      font-size: 20px;
+      line-height: 1.35;
+    }
+    .comment-section { margin-top: 20px; }
+    .comment-list { display: grid; gap: 12px; }
+    .comment-card { padding: 16px; }
+    .comment-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .comment-stats {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .comment-stat {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: var(--text-soft);
+      font-size: 13px;
+    }
+    .comment-stat strong { color: var(--text); font-size: 14px; }
+    .comment-body { font-size: 15px; line-height: 1.8; }
     @media (max-width: 860px) {
-      .wrap { width: min(100vw - 24px, 980px); padding: 18px 0 22px; }
-      .panel { padding: 22px 18px 20px; }
-      .title { font-size: 31px; }
-      .summary { grid-template-columns: 1fr; }
+      .wrap { width: min(100vw - 20px, 960px); padding: 10px 0 18px; }
+      .panel { padding: 16px; }
+      .title { font-size: 28px; }
+      .summary { grid-template-columns: 1fr 1fr; }
       .comment-header { flex-direction: column; }
       .comment-stats { justify-content: flex-start; }
       .snapshot-link-reference-item { grid-template-columns: 1fr; gap: 6px; }
@@ -1495,13 +1881,19 @@ function renderTopicHtml(payload: TopicPayload, opPost: TopicPost, commentPosts:
 <body>
   <main class="wrap">
     <section class="panel">
-      <span class="section-kicker">Discourse Snapshot</span>
+      <div class="section-heading">
+        <span class="section-kicker">Discourse Snapshot</span>
+        <span>${escapeHtml(createdAt)}</span>
+      </div>
       <h1 class="title">${title}</h1>
       ${badges}
       ${topicAuthorHeader}
-      <div class="hero-divider">\u9996\u697c\u6b63\u6587</div>
       <section class="post-shell">
-        <article class="post" data-snapshot-post-body="op">${cooked}</article>
+        <div class="section-heading">
+          <span class="section-kicker">\u9996\u697c\u6b63\u6587</span>
+          <strong>#1</strong>
+        </div>
+        <article class="post" data-snapshot-post-body="op" data-source-post-number="1" data-source-author="${authorName}">${cooked}</article>
       </section>
       <section class="summary">
         ${renderStatCard('\u6d4f\u89c8\u91cf', formatNumber(viewCount))}
@@ -1651,10 +2043,10 @@ export function createLinkshotMiddleware(config: ResolvedConfig, renderer: Snaps
     logger.info(`${TEXT.detected}${targetUrl}\uff08${session.platform}\uff09`)
 
     try {
-      let buffer: Buffer
+      let captureResult: Buffer | CaptureResult
 
       try {
-        buffer = await captureWithProxyFallback(false)
+        captureResult = await captureWithProxyFallback(false)
       } catch (publicError) {
         logger.warn(publicError)
 
@@ -1665,7 +2057,7 @@ export function createLinkshotMiddleware(config: ResolvedConfig, renderer: Snaps
         }
 
         try {
-          buffer = await captureWithProxyFallback(true)
+          captureResult = await captureWithProxyFallback(true)
         } catch (authError) {
           logger.warn(authError)
           logger.warn(`${TEXT.failure}${targetUrl}`)
@@ -1674,7 +2066,17 @@ export function createLinkshotMiddleware(config: ResolvedConfig, renderer: Snaps
         }
       }
 
+      const { buffer, forwardItems } = normalizeCaptureResult(captureResult)
       await sendSnapshot(session, buffer)
+
+      if (config.napcatMergedForward && forwardItems.length) {
+        try {
+          await sendNapCatMergedForward(session, forwardItems)
+        } catch (forwardError) {
+          logger.warn(forwardError)
+        }
+      }
+
       logger.info(`${TEXT.success}${targetUrl}`)
     } catch (error) {
       logger.warn(error)
@@ -1787,6 +2189,7 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
       return this.withPage(browser, baseOrigin, authenticated, async (page) => {
         await page.setContent(html, { waitUntil: this.config.pageWaitUntil, timeout: this.config.navigationTimeout })
         await page.evaluate((script) => new Function(script)(), SNAPSHOT_POST_PROCESS_SCRIPT)
+        const forwardItems = await page.evaluate((script) => new Function(script)() as SnapshotForwardItem[], SNAPSHOT_FORWARD_ITEM_SCRIPT)
         if (this.config.captureDelay > 0) await page.waitForTimeout(this.config.captureDelay)
 
         await page.evaluate((script) => new Function(script)(), DISCOURSE_WAIT_IMAGES_SCRIPT)
@@ -1797,7 +2200,10 @@ export class PlaywrightDiscourseRenderer implements SnapshotRenderer {
           timeout: this.config.navigationTimeout,
         })
 
-        return Buffer.from(buffer)
+        return {
+          buffer: Buffer.from(buffer),
+          forwardItems,
+        }
       })
     } finally {
       if (this.config.closeBrowserAfterCapture) {

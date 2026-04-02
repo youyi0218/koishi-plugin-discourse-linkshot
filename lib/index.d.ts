@@ -15,11 +15,13 @@ export interface Config {
     pageWaitUntil?: BrowserWaitUntil;
     browserTimeout?: number;
     captureDelay?: number;
+    commentWindowCount?: number;
     viewportWidth?: number;
     viewportHeight?: number;
     headless?: boolean;
     closeBrowserAfterCapture?: boolean;
     sendFailureMessage?: boolean;
+    napcatMergedForward?: boolean;
     proxyServer?: string;
     proxyBypass?: string;
     dohEnabled?: boolean;
@@ -40,11 +42,13 @@ export interface ResolvedConfig {
     pageWaitUntil: BrowserWaitUntil;
     browserTimeout: number;
     captureDelay: number;
+    commentWindowCount?: number;
     viewportWidth: number;
     viewportHeight: number;
     headless: boolean;
     closeBrowserAfterCapture: boolean;
     sendFailureMessage: boolean;
+    napcatMergedForward: boolean;
     proxyServer: string;
     proxyBypass: string;
     dohEnabled: boolean;
@@ -103,8 +107,19 @@ export interface CaptureOptions {
     authenticated?: boolean;
     useProxy?: boolean;
 }
+export interface SnapshotForwardItem {
+    type: 'link' | 'file';
+    url: string;
+    title: string;
+    sourcePostNumber?: number;
+    sourceAuthor?: string;
+}
+export interface CaptureResult {
+    buffer: Buffer;
+    forwardItems?: SnapshotForwardItem[];
+}
 export interface SnapshotRenderer {
-    capture(url: string, options?: CaptureOptions): Promise<Buffer>;
+    capture(url: string, options?: CaptureOptions): Promise<Buffer | CaptureResult>;
     dispose?(): Promise<void>;
 }
 export declare const Config: Schema<Config>;
@@ -147,7 +162,7 @@ export declare class PlaywrightDiscourseRenderer implements SnapshotRenderer {
     private launch;
     private closeBrowser;
     private withPage;
-    capture(url: string, options?: CaptureOptions): Promise<Buffer<ArrayBuffer>>;
+    capture(url: string, options?: CaptureOptions): Promise<CaptureResult>;
     dispose(): Promise<void>;
 }
 export declare function apply(ctx: Context, config: Config): void;
